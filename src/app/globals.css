@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: #1a1a1a;
+  --paper: #f8f6f3;
+  --accent: #4a5568;
+  --muted: #9ca3af;
+}
+
+.dark {
+  --ink: #e8e6e3;
+  --paper: #121212;
+  --accent: #94a3b8;
+  --muted: #64748b;
+}
+
+body {
+  color: var(--ink);
+  background: var(--paper);
+}
