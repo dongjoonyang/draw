@@ -2,11 +2,20 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 
 export type PoseLandmarks = Array<{ x: number; y: number; z?: number }>;
 
 type GuideMode = "none" | "skeleton" | "box";
 type BoxRenderMode = "off" | "wire" | "solid";
+export type GizmoMode = "translate" | "rotate" | "scale";
+
+export type BoxUpdateInfo = {
+  key: BoxKey;
+  positionOffset: THREE.Vector3;
+  rotationOffset: THREE.Quaternion;
+  scaleVec: THREE.Vector3;
+};
 
 type Props = {
   imageSrc: string | null;
@@ -26,8 +35,11 @@ type Props = {
   thighThickness?: number;
   calfThickness?: number;
   onLandmarks?: (landmarks: PoseLandmarks | null) => void;
+  /** 기즈모로 박스 변환 시 부모에게 변경값 전달 */
+  onBoxUpdate?: (info: BoxUpdateInfo) => void;
 };
 
+// ── Pose landmark indices ────────────────────────────────────────────────────
 const LEFT_SHOULDER = 11;
 const RIGHT_SHOULDER = 12;
 const LEFT_ELBOW = 13;
@@ -45,11 +57,18 @@ function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
 }
 
-type SceneBundle = {
-  torso: { rib: BoxVisual; waist: BoxVisual; pelvis: BoxVisual };
-  limbs: Record<LimbKey, BoxVisual>;
-  joints: Record<string, THREE.Mesh>;
-};
+// ── Types ────────────────────────────────────────────────────────────────────
+type TorsoKey = "rib" | "waist" | "pelvis";
+type LimbKey =
+  | "leftUpperArm"
+  | "rightUpperArm"
+  | "leftLowerArm"
+  | "rightLowerArm"
+  | "leftThigh"
+  | "rightThigh"
+  | "leftCalf"
+  | "rightCalf";
+export type BoxKey = TorsoKey | LimbKey;
 
 type BoxVisual = {
   key: BoxKey;
@@ -61,36 +80,33 @@ type BoxVisual = {
   edgeColor: number;
 };
 
-type TorsoKey = "rib" | "waist" | "pelvis";
-type LimbKey =
-  | "leftUpperArm"
-  | "rightUpperArm"
-  | "leftLowerArm"
-  | "rightLowerArm"
-  | "leftThigh"
-  | "rightThigh"
-  | "leftCalf"
-  | "rightCalf";
-type BoxKey = TorsoKey | LimbKey;
+type SceneBundle = {
+  torso: { rib: BoxVisual; waist: BoxVisual; pelvis: BoxVisual };
+  limbs: Record<LimbKey, BoxVisual>;
+  joints: Record<string, THREE.Mesh>;
+};
 
+/** 수동 보정값. 기즈모 결과가 이 값에 기록된다. */
 type ManualTransform = {
   positionOffset: THREE.Vector3;
   rotationOffset: THREE.Quaternion;
-  scale: number;
+  /** 축별 스케일 배율 (1,1,1 = 원본) */
+  scaleVec: THREE.Vector3;
+};
+
+/** updateMeshes가 매 프레임 기록하는 '기저 변환' (manual 적용 전) */
+type BaseTransform = {
+  position: THREE.Vector3;
+  quaternion: THREE.Quaternion;
+  scale: THREE.Vector3;
 };
 
 const ALL_BOX_KEYS: BoxKey[] = [
-  "rib",
-  "waist",
-  "pelvis",
-  "leftUpperArm",
-  "rightUpperArm",
-  "leftLowerArm",
-  "rightLowerArm",
-  "leftThigh",
-  "rightThigh",
-  "leftCalf",
-  "rightCalf",
+  "rib", "waist", "pelvis",
+  "leftUpperArm", "rightUpperArm",
+  "leftLowerArm", "rightLowerArm",
+  "leftThigh", "rightThigh",
+  "leftCalf", "rightCalf",
 ];
 
 function createManualMap(): Record<BoxKey, ManualTransform> {
@@ -98,12 +114,27 @@ function createManualMap(): Record<BoxKey, ManualTransform> {
     acc[key] = {
       positionOffset: new THREE.Vector3(),
       rotationOffset: new THREE.Quaternion(),
-      scale: 1,
+      scaleVec: new THREE.Vector3(1, 1, 1),
     };
     return acc;
   }, {} as Record<BoxKey, ManualTransform>);
 }
 
+function getBoxVisualByKey(bundle: SceneBundle, key: BoxKey): BoxVisual | null {
+  if (key === "rib") return bundle.torso.rib;
+  if (key === "waist") return bundle.torso.waist;
+  if (key === "pelvis") return bundle.torso.pelvis;
+  return (bundle.limbs as Record<string, BoxVisual>)[key] ?? null;
+}
+
+// ── Gizmo 모드 레이블 ────────────────────────────────────────────────────────
+const GIZMO_MODE_LABEL: Record<GizmoMode, string> = {
+  translate: "이동 (T)",
+  rotate: "회전 (R)",
+  scale: "스케일 (S)",
+};
+
+// ── Component ────────────────────────────────────────────────────────────────
 export default function PoseOverlay({
   imageSrc,
   guideMode,
@@ -122,6 +153,7 @@ export default function PoseOverlay({
   thighThickness = 1,
   calfThickness = 0.88,
   onLandmarks,
+  onBoxUpdate,
 }: Props) {
   const skeletonCanvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -136,25 +168,14 @@ export default function PoseOverlay({
   const bundleRef = useRef<SceneBundle | null>(null);
   const rafRef = useRef<number | null>(null);
   const manualRef = useRef<Record<BoxKey, ManualTransform>>(createManualMap());
-  const interactionRef = useRef<{
-    selected: BoxKey | null;
-    dragging: boolean;
-    rotating: boolean;
-    lastPoint: THREE.Vector3 | null;
-    lastX: number;
-    lastY: number;
-  }>({
-    selected: null,
-    dragging: false,
-    rotating: false,
-    lastPoint: null,
-    lastX: 0,
-    lastY: 0,
-  });
+  /** 매 프레임 updateMeshes가 기록하는 기저 변환 */
+  const baseTransformsRef = useRef<Partial<Record<BoxKey, BaseTransform>>>({});
 
   const [landmarks, setLandmarks] = useState<PoseLandmarks | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
+  const [selectedKey, setSelectedKey] = useState<BoxKey | null>(null);
 
   const showGuide = guideMode === "skeleton" || guideMode === "box";
   const showSkeleton = guideMode === "skeleton";
@@ -164,6 +185,7 @@ export default function PoseOverlay({
     landmarksRef.current = landmarks;
   }, [landmarks]);
 
+  // ── MediaPipe 포즈 분석 ──────────────────────────────────────────────────
   useEffect(() => {
     if (!imageSrc || !showGuide) return;
 
@@ -176,13 +198,11 @@ export default function PoseOverlay({
       setError(null);
       try {
         const { FilesetResolver, PoseLandmarker } = await import("@mediapipe/tasks-vision");
-
         poseConnectionsRef.current = PoseLandmarker.POSE_CONNECTIONS;
 
         const vision = await FilesetResolver.forVisionTasks(
           "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
         );
-
         const poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath:
@@ -192,7 +212,6 @@ export default function PoseOverlay({
         });
 
         const result = poseLandmarker.detect(img);
-
         if (result.landmarks && result.landmarks[0]) {
           const pts = result.landmarks[0].map((l) => ({
             x: clamp01(l.x),
@@ -230,9 +249,11 @@ export default function PoseOverlay({
 
   useEffect(() => {
     manualRef.current = createManualMap();
-    interactionRef.current.selected = null;
+    baseTransformsRef.current = {};
+    setSelectedKey(null);
   }, [imageSrc]);
 
+  // ── 스켈레톤 캔버스 렌더 ─────────────────────────────────────────────────
   useEffect(() => {
     if (!showSkeleton) {
       const canvas = skeletonCanvasRef.current;
@@ -252,11 +273,7 @@ export default function PoseOverlay({
     canvas.width = rect.width;
     canvas.height = rect.height;
 
-    const toCanvas = (x: number, y: number) => ({
-      x: x * rect.width,
-      y: y * rect.height,
-    });
-
+    const toCanvas = (x: number, y: number) => ({ x: x * rect.width, y: y * rect.height });
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const connections = poseConnectionsRef.current;
@@ -269,7 +286,6 @@ export default function PoseOverlay({
         if (!a || !b) continue;
         if (a.x < 0 || a.x > 1 || a.y < 0 || a.y > 1) continue;
         if (b.x < 0 || b.x > 1 || b.y < 0 || b.y > 1) continue;
-
         const p1 = toCanvas(a.x, a.y);
         const p2 = toCanvas(b.x, b.y);
         ctx.beginPath();
@@ -280,6 +296,7 @@ export default function PoseOverlay({
     }
   }, [landmarks, showSkeleton]);
 
+  // ── Three.js 씬 + TransformControls ─────────────────────────────────────
   useEffect(() => {
     if (!showThree || !threeLayerRef.current) return;
 
@@ -298,13 +315,17 @@ export default function PoseOverlay({
 
     const camera = new THREE.PerspectiveCamera(34, 1, 0.01, 100);
 
-    const createBox = (key: BoxKey, opts?: {
-      midline?: boolean;
-      sideDiagonal?: boolean;
-      faceColor?: number;
-      edgeColor?: number;
-      shape?: "box" | "cylinder";
-    }): BoxVisual => {
+    // ── 박스/실린더 생성 헬퍼 ──────────────────────────────────────────────
+    const createBox = (
+      key: BoxKey,
+      opts?: {
+        midline?: boolean;
+        sideDiagonal?: boolean;
+        faceColor?: number;
+        edgeColor?: number;
+        shape?: "box" | "cylinder";
+      }
+    ): BoxVisual => {
       const faceColor = opts?.faceColor ?? 0xf8f8f8;
       const edgeColor = opts?.edgeColor ?? 0x0a0a0a;
       const shape = opts?.shape ?? "box";
@@ -312,6 +333,7 @@ export default function PoseOverlay({
         shape === "cylinder"
           ? new THREE.CylinderGeometry(0.5, 0.5, 1, 20, 1, false)
           : new THREE.BoxGeometry(1, 1, 1);
+
       const mesh = new THREE.Mesh(
         geometry,
         new THREE.MeshBasicMaterial({
@@ -357,27 +379,9 @@ export default function PoseOverlay({
     };
 
     const torso = {
-      rib: createBox("rib", {
-        midline: true,
-        sideDiagonal: true,
-        shape: "box",
-        faceColor: 0xdbeafe,
-        edgeColor: 0x1d4ed8,
-      }),
-      waist: createBox("waist", {
-        midline: true,
-        sideDiagonal: true,
-        shape: "box",
-        faceColor: 0xe9d5ff,
-        edgeColor: 0x7e22ce,
-      }),
-      pelvis: createBox("pelvis", {
-        midline: true,
-        sideDiagonal: true,
-        shape: "box",
-        faceColor: 0xfef3c7,
-        edgeColor: 0xb45309,
-      }),
+      rib: createBox("rib", { midline: true, sideDiagonal: true, shape: "box", faceColor: 0xdbeafe, edgeColor: 0x1d4ed8 }),
+      waist: createBox("waist", { midline: true, sideDiagonal: true, shape: "box", faceColor: 0xe9d5ff, edgeColor: 0x7e22ce }),
+      pelvis: createBox("pelvis", { midline: true, sideDiagonal: true, shape: "box", faceColor: 0xfef3c7, edgeColor: 0xb45309 }),
     };
 
     const limbs: Record<LimbKey, BoxVisual> = {
@@ -412,28 +416,16 @@ export default function PoseOverlay({
     cameraRef.current = camera;
     sceneRef.current = scene;
 
-    const getAllMeshes = () => {
-      const bundle = bundleRef.current;
-      if (!bundle) return [] as THREE.Mesh[];
-      return [
-        bundle.torso.rib.mesh,
-        bundle.torso.waist.mesh,
-        bundle.torso.pelvis.mesh,
-        ...Object.values(bundle.limbs).map((b) => b.mesh),
-        ...Object.values(bundle.joints),
-      ];
+    const getAllBoxes = (): BoxVisual[] => {
+      const b = bundleRef.current;
+      if (!b) return [];
+      return [b.torso.rib, b.torso.waist, b.torso.pelvis, ...Object.values(b.limbs)];
     };
 
-    const getAllBoxes = () => {
-      const bundle = bundleRef.current;
-      if (!bundle) return [] as BoxVisual[];
-      return [bundle.torso.rib, bundle.torso.waist, bundle.torso.pelvis, ...Object.values(bundle.limbs)];
-    };
-
-    const applyRenderMode = () => {
+    // ── 렌더 모드 적용 ────────────────────────────────────────────────────
+    const applyRenderMode = (currentSelectedKey: BoxKey | null) => {
       const isOff = boxRenderMode === "off";
       const wire = boxRenderMode === "wire";
-      const selected = interactionRef.current.selected;
 
       for (const box of getAllBoxes()) {
         box.mesh.visible = !isOff;
@@ -442,14 +434,13 @@ export default function PoseOverlay({
         boxMat.color.setHex(box.faceColor);
         boxMat.needsUpdate = true;
 
-        const lineParts = [box.edges, box.midline, box.sideDiagonal].filter(
-          Boolean
-        ) as Array<THREE.Line | THREE.LineSegments>;
+        const lineParts = [box.edges, box.midline, box.sideDiagonal].filter(Boolean) as Array<
+          THREE.Line | THREE.LineSegments
+        >;
         for (const part of lineParts) {
           part.visible = !isOff;
           const lineMat = part.material as THREE.LineBasicMaterial;
-          const isSelected = selected === box.key;
-          lineMat.color.setHex(isSelected ? 0xff2d2d : box.edgeColor);
+          lineMat.color.setHex(currentSelectedKey === box.key ? 0xff2d2d : box.edgeColor);
           lineMat.opacity = boxOpacity;
           lineMat.needsUpdate = true;
         }
@@ -465,111 +456,10 @@ export default function PoseOverlay({
       }
     };
 
-    const getPointerNdc = (event: PointerEvent) => {
-      const rect = renderer.domElement.getBoundingClientRect();
-      return {
-        x: ((event.clientX - rect.left) / rect.width) * 2 - 1,
-        y: -((event.clientY - rect.top) / rect.height) * 2 + 1,
-      };
-    };
-
-    const getPlanePoint = (event: PointerEvent, planeZ = 0) => {
-      if (!cameraRef.current) return null;
-      const ndc = getPointerNdc(event);
-      const origin = new THREE.Vector3(ndc.x, ndc.y, -1).unproject(cameraRef.current);
-      const far = new THREE.Vector3(ndc.x, ndc.y, 1).unproject(cameraRef.current);
-      const direction = far.sub(origin).normalize();
-      if (Math.abs(direction.z) < 1e-6) return null;
-      const t = (planeZ - origin.z) / direction.z;
-      return origin.add(direction.multiplyScalar(t));
-    };
-
-    const pickBox = (event: PointerEvent): BoxKey | null => {
-      if (!cameraRef.current || !bundleRef.current) return null;
-      const ndc = getPointerNdc(event);
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), cameraRef.current);
-      const targets = getAllBoxes().map((b) => b.mesh);
-      const hits = raycaster.intersectObjects(targets, false);
-      if (!hits.length) return null;
-      const picked = getAllBoxes().find((b) => b.mesh === hits[0].object);
-      return picked?.key ?? null;
-    };
-
-    const onPointerDown = (event: PointerEvent) => {
-      if (boxRenderMode === "off") return;
-      const selected = pickBox(event);
-      interactionRef.current.selected = selected;
-      if (!selected) return;
-
-      if (event.button === 0) {
-        interactionRef.current.dragging = true;
-        interactionRef.current.rotating = false;
-        interactionRef.current.lastPoint = getPlanePoint(event, 0);
-      } else if (event.button === 2) {
-        interactionRef.current.rotating = true;
-        interactionRef.current.dragging = false;
-        interactionRef.current.lastX = event.clientX;
-        interactionRef.current.lastY = event.clientY;
-      }
-      renderer.domElement.setPointerCapture(event.pointerId);
-    };
-
-    const onPointerMove = (event: PointerEvent) => {
-      const state = interactionRef.current;
-      const key = state.selected;
-      if (!key) return;
-      const manual = manualRef.current[key];
-
-      if (state.dragging) {
-        const point = getPlanePoint(event, 0);
-        if (!point || !state.lastPoint) return;
-        const delta = point.clone().sub(state.lastPoint);
-        manual.positionOffset.add(delta);
-        state.lastPoint = point;
-      } else if (state.rotating) {
-        const dx = event.clientX - state.lastX;
-        const dy = event.clientY - state.lastY;
-        state.lastX = event.clientX;
-        state.lastY = event.clientY;
-        const qYaw = new THREE.Quaternion().setFromAxisAngle(
-          new THREE.Vector3(0, 1, 0),
-          dx * 0.01
-        );
-        const qPitch = new THREE.Quaternion().setFromAxisAngle(
-          new THREE.Vector3(1, 0, 0),
-          dy * 0.01
-        );
-        manual.rotationOffset.multiply(qYaw).multiply(qPitch);
-      }
-    };
-
-    const onPointerUp = (event: PointerEvent) => {
-      interactionRef.current.dragging = false;
-      interactionRef.current.rotating = false;
-      interactionRef.current.lastPoint = null;
-      if (renderer.domElement.hasPointerCapture(event.pointerId)) {
-        renderer.domElement.releasePointerCapture(event.pointerId);
-      }
-    };
-
-    const onWheel = (event: WheelEvent) => {
-      const key = pickBox(event as unknown as PointerEvent) ?? interactionRef.current.selected;
-      if (!key) return;
-      event.preventDefault();
-      const manual = manualRef.current[key];
-      const next = manual.scale + (event.deltaY < 0 ? 0.05 : -0.05);
-      manual.scale = Math.max(0.55, Math.min(1.8, next));
-    };
-
-    const onContextMenu = (event: MouseEvent) => {
-      event.preventDefault();
-    };
-
+    // ── 씬 크기 동기화 ────────────────────────────────────────────────────
     const updateSize = () => {
       const img = imageRef.current;
       if (!img || !cameraRef.current || !rendererRef.current) return;
-
       const rect = img.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
 
@@ -580,11 +470,18 @@ export default function PoseOverlay({
 
       const worldHeight = 2;
       const fovRad = (cameraRef.current.fov * Math.PI) / 180;
-      cameraRef.current.position.z = (worldHeight / 2) / Math.tan(fovRad / 2);
+      cameraRef.current.position.z = worldHeight / 2 / Math.tan(fovRad / 2);
       cameraRef.current.updateProjectionMatrix();
     };
 
-    const updateMeshes = () => {
+    // ── 메시 업데이트 (랜드마크 → 월드 변환) ────────────────────────────
+    /**
+     * 1) 기저 변환(base)을 계산해 baseTransformsRef에 기록
+     * 2) base * manual 을 메시에 적용
+     * TransformControls의 object-change가 manualRef를 업데이트하므로
+     * 다음 프레임에서 updateMeshes가 같은 결과를 재현한다.
+     */
+    const updateMeshes = (currentSelectedKey: BoxKey | null) => {
       const pts = landmarksRef.current;
       const bundle = bundleRef.current;
       const img = imageRef.current;
@@ -598,11 +495,13 @@ export default function PoseOverlay({
 
       const rect = img.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
+
       const aspect = rect.width / rect.height;
       const worldHeight = 2;
       const worldWidth = worldHeight * aspect;
       const depthScale = worldWidth * 0.22;
-      const valid = (p: { x: number; y: number }) => p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1;
+      const valid = (p: { x: number; y: number }) =>
+        p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1;
 
       const toWorld2D = (p: { x: number; y: number }) =>
         new THREE.Vector3((p.x - 0.5) * worldWidth, (0.5 - p.y) * worldHeight, 0);
@@ -613,15 +512,10 @@ export default function PoseOverlay({
           -(p.z ?? 0) * depthScale
         );
 
-      const pLS2 = toWorld2D(ls);
-      const pRS2 = toWorld2D(rs);
-      const pLH2 = toWorld2D(lh);
-      const pRH2 = toWorld2D(rh);
-
-      const pLS3 = toWorld3D(ls);
-      const pRS3 = toWorld3D(rs);
-      const pLH3 = toWorld3D(lh);
-      const pRH3 = toWorld3D(rh);
+      const pLS2 = toWorld2D(ls), pRS2 = toWorld2D(rs);
+      const pLH2 = toWorld2D(lh), pRH2 = toWorld2D(rh);
+      const pLS3 = toWorld3D(ls), pRS3 = toWorld3D(rs);
+      const pLH3 = toWorld3D(lh), pRH3 = toWorld3D(rh);
 
       const shoulderMid2 = pLS2.clone().add(pRS2).multiplyScalar(0.5);
       const hipMid2 = pLH2.clone().add(pRH2).multiplyScalar(0.5);
@@ -633,13 +527,12 @@ export default function PoseOverlay({
       if (rawLateral.lengthSq() < 1e-6) return;
 
       let forwardAxis = rawLateral.clone().cross(upAxis).normalize();
-      if (forwardAxis.lengthSq() < 1e-6) {
-        forwardAxis = new THREE.Vector3(0, 0, 1);
-      }
+      if (forwardAxis.lengthSq() < 1e-6) forwardAxis = new THREE.Vector3(0, 0, 1);
       const lateralAxis = upAxis.clone().cross(forwardAxis).normalize();
       const torsoBaseRotation = new THREE.Quaternion().setFromRotationMatrix(
         new THREE.Matrix4().makeBasis(lateralAxis, upAxis, forwardAxis)
       );
+
       const shoulderYaw = ((rs.z ?? 0) - (ls.z ?? 0)) * 3.0;
       const hipYaw = ((rh.z ?? 0) - (lh.z ?? 0)) * 3.6;
       const ribRotation = torsoBaseRotation
@@ -651,16 +544,41 @@ export default function PoseOverlay({
 
       const shoulderWidth = pRS2.distanceTo(pLS2);
       const hipWidth = pRH2.distanceTo(pLH2);
-
       const torsoLength = Math.max(shoulderMid2.distanceTo(hipMid2), worldHeight * 0.18);
       const torsoUp2 = shoulderMid2.clone().sub(hipMid2).normalize();
 
+      // ── 토르소 박스 ────────────────────────────────────────────────────
+      const applyTorsoBox = (
+        box: BoxVisual,
+        basePos: THREE.Vector3,
+        baseQuat: THREE.Quaternion,
+        bx: number, by: number, bz: number
+      ) => {
+        const manual = manualRef.current[box.key];
+        baseTransformsRef.current[box.key] = {
+          position: basePos.clone(),
+          quaternion: baseQuat.clone(),
+          scale: new THREE.Vector3(bx, by, bz),
+        };
+        box.mesh.position.copy(basePos).add(manual.positionOffset);
+        box.mesh.quaternion.copy(baseQuat).multiply(manual.rotationOffset);
+        box.mesh.scale.set(
+          bx * manual.scaleVec.x,
+          by * manual.scaleVec.y,
+          bz * manual.scaleVec.z
+        );
+      };
+
       const ribHeight = Math.max(torsoLength * 0.4, worldHeight * 0.11) * ribHeightScale;
       const ribShoulderLift = torsoLength * 0.08;
-      const ribCenter = shoulderMid2
-        .clone()
-        .add(torsoUp2.clone().multiplyScalar(ribShoulderLift - ribHeight * 0.5));
+      const ribCenter = shoulderMid2.clone().add(torsoUp2.clone().multiplyScalar(ribShoulderLift - ribHeight * 0.5));
       const ribDepth = Math.max(shoulderWidth * boxThickness * 1.35, worldWidth * 0.055);
+      applyTorsoBox(
+        bundle.torso.rib,
+        ribCenter, ribRotation,
+        Math.max(shoulderWidth * ribcageScale, worldWidth * 0.08),
+        ribHeight, ribDepth
+      );
 
       const waistHeight = Math.max(torsoLength * 0.25, worldHeight * 0.09) * waistHeightScale;
       const waistCenter = shoulderMid2.clone().lerp(hipMid2, 0.56);
@@ -670,42 +588,33 @@ export default function PoseOverlay({
       const waistRotation = torsoBaseRotation
         .clone()
         .multiply(new THREE.Quaternion().setFromAxisAngle(upAxis, waistYaw));
+      applyTorsoBox(
+        bundle.torso.waist,
+        waistCenter, waistRotation,
+        Math.max(waistWidth * waistScale, worldWidth * 0.07),
+        waistHeight, waistDepth
+      );
 
       const pelvisHeight = Math.max(torsoLength * 0.33, worldHeight * 0.12) * pelvisHeightScale;
       const pelvisCenter = hipMid2.clone().add(torsoUp2.clone().multiplyScalar(pelvisHeight * 0.5));
       const pelvisDepth = Math.max(hipWidth * boxThickness * 1.7, worldWidth * 0.065);
-
-      const ribManual = manualRef.current.rib;
-      const waistManual = manualRef.current.waist;
-      const pelvisManual = manualRef.current.pelvis;
-
-      bundle.torso.rib.mesh.position.copy(ribCenter).add(ribManual.positionOffset);
-      bundle.torso.rib.mesh.quaternion.copy(ribRotation).multiply(ribManual.rotationOffset);
-      bundle.torso.rib.mesh.scale.set(
-        Math.max(shoulderWidth * ribcageScale, worldWidth * 0.08),
-        ribHeight,
-        ribDepth
-      ).multiplyScalar(ribManual.scale);
-
-      bundle.torso.waist.mesh.position.copy(waistCenter).add(waistManual.positionOffset);
-      bundle.torso.waist.mesh.quaternion.copy(waistRotation).multiply(waistManual.rotationOffset);
-      bundle.torso.waist.mesh.scale.set(
-        Math.max(waistWidth * waistScale, worldWidth * 0.07),
-        waistHeight,
-        waistDepth
-      ).multiplyScalar(waistManual.scale);
-
-      bundle.torso.pelvis.mesh.position.copy(pelvisCenter).add(pelvisManual.positionOffset);
-      bundle.torso.pelvis.mesh.quaternion.copy(pelvisRotation).multiply(pelvisManual.rotationOffset);
-      bundle.torso.pelvis.mesh.scale.set(
+      applyTorsoBox(
+        bundle.torso.pelvis,
+        pelvisCenter, pelvisRotation,
         Math.max(hipWidth * pelvisScale, worldWidth * 0.08),
-        pelvisHeight,
-        pelvisDepth
-      ).multiplyScalar(pelvisManual.scale);
+        pelvisHeight, pelvisDepth
+      );
 
-      const limbBaseThickness = Math.max(((shoulderWidth + hipWidth) / 2) * boxThickness * 0.5, worldWidth * 0.015);
+      // ── 팔다리 실린더 ─────────────────────────────────────────────────
+      const limbBaseThickness =
+        Math.max(((shoulderWidth + hipWidth) / 2) * boxThickness * 0.5, worldWidth * 0.015);
 
-      const setLimbByLookAt = (box: BoxVisual, startIdx: number, endIdx: number, thicknessFactor: number) => {
+      const setLimbByLookAt = (
+        box: BoxVisual,
+        startIdx: number,
+        endIdx: number,
+        thicknessFactor: number
+      ) => {
         const s = pts[startIdx];
         const e = pts[endIdx];
         const manual = manualRef.current[box.key];
@@ -714,39 +623,37 @@ export default function PoseOverlay({
           return;
         }
 
-        const s2 = toWorld2D(s);
-        const e2 = toWorld2D(e);
-        const s3 = toWorld3D(s);
-        const e3 = toWorld3D(e);
-
+        const s2 = toWorld2D(s), e2 = toWorld2D(e);
+        const s3 = toWorld3D(s), e3 = toWorld3D(e);
         const length = s2.distanceTo(e2);
-        if (length < worldHeight * 0.02) {
-          box.mesh.visible = false;
-          return;
-        }
-
-        box.mesh.visible = boxRenderMode !== "off";
-        box.mesh.position.copy(s2.clone().add(e2).multiplyScalar(0.5)).add(manual.positionOffset);
+        if (length < worldHeight * 0.02) { box.mesh.visible = false; return; }
 
         const dir2 = e2.clone().sub(s2).normalize();
         const dir3 = e3.clone().sub(s3).normalize();
-        if (dir2.lengthSq() < 1e-6) {
-          box.mesh.visible = false;
-          return;
-        }
-        const q2 = new THREE.Quaternion().setFromUnitVectors(
-          new THREE.Vector3(0, 1, 0),
-          dir2
-        );
+        if (dir2.lengthSq() < 1e-6) { box.mesh.visible = false; return; }
+
+        const q2 = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir2);
         const zTilt = Math.atan2(dir3.z, Math.max(1e-6, Math.hypot(dir3.x, dir3.y)));
-        const qTilt = new THREE.Quaternion().setFromAxisAngle(
-          new THREE.Vector3(1, 0, 0),
-          -zTilt
-        );
-        box.mesh.quaternion.copy(q2.multiply(qTilt)).multiply(manual.rotationOffset);
+        const qTilt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -zTilt);
+        const baseQuat = q2.clone().multiply(qTilt);
 
         const thick = Math.max(limbBaseThickness * thicknessFactor, worldWidth * 0.01);
-        box.mesh.scale.set(thick, length, thick).multiplyScalar(manual.scale);
+        const basePos = s2.clone().add(e2).multiplyScalar(0.5);
+
+        baseTransformsRef.current[box.key] = {
+          position: basePos.clone(),
+          quaternion: baseQuat.clone(),
+          scale: new THREE.Vector3(thick, length, thick),
+        };
+
+        box.mesh.visible = boxRenderMode !== "off";
+        box.mesh.position.copy(basePos).add(manual.positionOffset);
+        box.mesh.quaternion.copy(baseQuat).multiply(manual.rotationOffset);
+        box.mesh.scale.set(
+          thick * manual.scaleVec.x,
+          length * manual.scaleVec.y,
+          thick * manual.scaleVec.z
+        );
       };
 
       setLimbByLookAt(bundle.limbs.leftUpperArm, LEFT_SHOULDER, LEFT_ELBOW, upperArmThickness);
@@ -760,10 +667,7 @@ export default function PoseOverlay({
 
       const setJointSphere = (mesh: THREE.Mesh, idx: number) => {
         const p = pts[idx];
-        if (!p || !valid(p)) {
-          mesh.visible = false;
-          return;
-        }
+        if (!p || !valid(p)) { mesh.visible = false; return; }
         mesh.visible = boxRenderMode !== "off";
         mesh.position.copy(toWorld2D(p));
         const r = Math.max(limbBaseThickness * 0.45, worldWidth * 0.006);
@@ -775,43 +679,48 @@ export default function PoseOverlay({
       setJointSphere(bundle.joints.leftKnee, LEFT_KNEE);
       setJointSphere(bundle.joints.rightKnee, RIGHT_KNEE);
 
-      applyRenderMode();
+      applyRenderMode(currentSelectedKey);
     };
+
+    // ── TransformControls (기즈모) 설정 ──────────────────────────────────
+    const { controls: tc, destroy: destroyGizmo } = setupGizmoController({
+      scene,
+      camera,
+      renderer,
+      getAllBoxes,
+      manualRef,
+      baseTransformsRef,
+      bundleRef,
+      onModeChange: setGizmoMode,
+      onSelectChange: setSelectedKey,
+      onBoxUpdate,
+    });
+
+    // ── 렌더 루프 ─────────────────────────────────────────────────────────
+    // selectedKey는 gizmoStateRef 내부에서 관리되어 클로저로 접근
+    const gizmoSelectedRef = { current: null as BoxKey | null };
+    // patch: gizmoController가 gizmoSelectedRef를 공유
+    (tc as unknown as { _poseOverlaySelectedRef: typeof gizmoSelectedRef })
+      ._poseOverlaySelectedRef = gizmoSelectedRef;
 
     const tick = () => {
       updateSize();
-      updateMeshes();
-      if (sceneRef.current && cameraRef.current && rendererRef.current) {
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
-      }
+      updateMeshes(gizmoSelectedRef.current);
+      renderer.render(scene, camera);
       rafRef.current = window.requestAnimationFrame(tick);
     };
-
     tick();
 
-    const resizeObserver = new ResizeObserver(() => {
-      updateSize();
-    });
+    const resizeObserver = new ResizeObserver(() => updateSize());
     const img = imageRef.current;
     if (img) resizeObserver.observe(img);
-    renderer.domElement.addEventListener("pointerdown", onPointerDown);
-    renderer.domElement.addEventListener("pointermove", onPointerMove);
-    renderer.domElement.addEventListener("pointerup", onPointerUp);
-    renderer.domElement.addEventListener("pointerleave", onPointerUp);
-    renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
-    renderer.domElement.addEventListener("contextmenu", onContextMenu);
 
     return () => {
       if (rafRef.current !== null) {
         window.cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
-      renderer.domElement.removeEventListener("pointerdown", onPointerDown);
-      renderer.domElement.removeEventListener("pointermove", onPointerMove);
-      renderer.domElement.removeEventListener("pointerup", onPointerUp);
-      renderer.domElement.removeEventListener("pointerleave", onPointerUp);
-      renderer.domElement.removeEventListener("wheel", onWheel);
-      renderer.domElement.removeEventListener("contextmenu", onContextMenu);
+      destroyGizmo();
       resizeObserver.disconnect();
       renderer.dispose();
       container.innerHTML = "";
@@ -835,8 +744,10 @@ export default function PoseOverlay({
     lowerArmThickness,
     thighThickness,
     calfThickness,
+    onBoxUpdate,
   ]);
 
+  // ── JSX ──────────────────────────────────────────────────────────────────
   if (!imageSrc) return null;
 
   return (
@@ -860,9 +771,27 @@ export default function PoseOverlay({
       {showThree && (
         <div
           ref={threeLayerRef}
-          className="absolute left-0 top-0 cursor-grab active:cursor-grabbing"
+          className="absolute left-0 top-0"
           style={{ maxHeight: "92vh" }}
         />
+      )}
+
+      {/* 기즈모 모드 HUD */}
+      {showThree && selectedKey && (
+        <div className="pointer-events-none absolute bottom-3 left-1/2 flex -translate-x-1/2 gap-2">
+          {(["translate", "rotate", "scale"] as GizmoMode[]).map((mode) => (
+            <span
+              key={mode}
+              className={`rounded px-2 py-0.5 text-xs font-mono ${
+                gizmoMode === mode
+                  ? "bg-white/90 text-black"
+                  : "bg-black/40 text-white/60"
+              }`}
+            >
+              {GIZMO_MODE_LABEL[mode]}
+            </span>
+          ))}
+        </div>
       )}
 
       {showGuide && loading && (
@@ -878,4 +807,165 @@ export default function PoseOverlay({
       )}
     </div>
   );
+}
+
+// ── 기즈모 컨트롤러 (분리된 설정 함수) ─────────────────────────────────────
+type GizmoControllerParams = {
+  scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
+  renderer: THREE.WebGLRenderer;
+  getAllBoxes: () => BoxVisual[];
+  manualRef: { current: Record<BoxKey, ManualTransform> };
+  baseTransformsRef: { current: Partial<Record<BoxKey, BaseTransform>> };
+  bundleRef: { current: SceneBundle | null };
+  onModeChange: (mode: GizmoMode) => void;
+  onSelectChange: (key: BoxKey | null) => void;
+  onBoxUpdate?: (info: BoxUpdateInfo) => void;
+};
+
+function setupGizmoController({
+  scene,
+  camera,
+  renderer,
+  getAllBoxes,
+  manualRef,
+  baseTransformsRef,
+  bundleRef,
+  onModeChange,
+  onSelectChange,
+  onBoxUpdate,
+}: GizmoControllerParams): { controls: TransformControls; destroy: () => void } {
+  const tc = new TransformControls(camera, renderer.domElement);
+  tc.setSize(0.8);
+  scene.add(tc);
+
+  // 현재 선택된 박스 키 (이 함수 스코프 내에서 공유)
+  let selectedKey: BoxKey | null = null;
+  let currentMode: GizmoMode = "translate";
+
+  // ── object-change: TC가 메시를 변환할 때 manualRef를 역산해 동기화 ──
+  const handleObjectChange = (_event: THREE.Event<"object-change", TransformControls>) => {
+    if (!selectedKey) return;
+    const base = baseTransformsRef.current[selectedKey];
+    const bundle = bundleRef.current;
+    if (!base || !bundle) return;
+
+    const box = getBoxVisualByKey(bundle, selectedKey);
+    if (!box) return;
+    const mesh = box.mesh;
+    const manual = manualRef.current[selectedKey];
+
+    // position: mesh.pos = basePos + offset  →  offset = mesh.pos - basePos
+    manual.positionOffset.copy(mesh.position).sub(base.position);
+
+    // quaternion: mesh.quat = baseQuat * rotOffset  →  rotOffset = baseQuat⁻¹ * mesh.quat
+    manual.rotationOffset.copy(base.quaternion).invert().multiply(mesh.quaternion);
+
+    // scale: mesh.scale = base.scale * scaleVec (component-wise)
+    manual.scaleVec.set(
+      base.scale.x > 0 ? mesh.scale.x / base.scale.x : 1,
+      base.scale.y > 0 ? mesh.scale.y / base.scale.y : 1,
+      base.scale.z > 0 ? mesh.scale.z / base.scale.z : 1
+    );
+
+    onBoxUpdate?.({
+      key: selectedKey,
+      positionOffset: manual.positionOffset.clone(),
+      rotationOffset: manual.rotationOffset.clone(),
+      scaleVec: manual.scaleVec.clone(),
+    });
+  };
+
+  // ── dragging-changed: 아이패드 스크롤 방지 ────────────────────────────
+  const handleDraggingChanged = (
+    event: THREE.Event<"dragging-changed", TransformControls> & { value: unknown }
+  ) => {
+    const isDragging = !!event.value;
+    renderer.domElement.style.touchAction = isDragging ? "none" : "auto";
+  };
+
+  tc.addEventListener("object-change", handleObjectChange);
+  tc.addEventListener("dragging-changed", handleDraggingChanged);
+
+  // ── 박스 클릭으로 선택 ────────────────────────────────────────────────
+  const getPointerNdc = (event: PointerEvent) => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      y: -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    };
+  };
+
+  const handlePointerDown = (event: PointerEvent) => {
+    if (event.button !== 0) return;
+    // TC가 드래그 중이면 박스 선택 로직 스킵
+    if (tc.dragging) return;
+
+    const ndc = getPointerNdc(event);
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), camera);
+
+    const boxes = getAllBoxes();
+    const targets = boxes.map((b) => b.mesh);
+    const hits = raycaster.intersectObjects(targets, false);
+
+    if (hits.length > 0) {
+      const picked = boxes.find((b) => b.mesh === hits[0].object);
+      if (picked && picked.key !== selectedKey) {
+        selectedKey = picked.key;
+        // ref를 통해 tick 루프에도 전달
+        const tcAny = tc as unknown as { _poseOverlaySelectedRef?: { current: BoxKey | null } };
+        if (tcAny._poseOverlaySelectedRef) tcAny._poseOverlaySelectedRef.current = selectedKey;
+        tc.attach(picked.mesh);
+        tc.setMode(currentMode);
+        onSelectChange(selectedKey);
+      }
+    }
+    // 빈 공간 클릭 시 선택 해제하지 않음 (Escape로 해제)
+  };
+
+  // ── 키보드 단축키: T/R/S/Escape ──────────────────────────────────────
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+    switch (e.key.toLowerCase()) {
+      case "t":
+        currentMode = "translate";
+        tc.setMode("translate");
+        onModeChange("translate");
+        break;
+      case "r":
+        currentMode = "rotate";
+        tc.setMode("rotate");
+        onModeChange("rotate");
+        break;
+      case "s":
+        currentMode = "scale";
+        tc.setMode("scale");
+        onModeChange("scale");
+        break;
+      case "escape":
+        selectedKey = null;
+        const tcAny = tc as unknown as { _poseOverlaySelectedRef?: { current: BoxKey | null } };
+        if (tcAny._poseOverlaySelectedRef) tcAny._poseOverlaySelectedRef.current = null;
+        tc.detach();
+        onSelectChange(null);
+        break;
+    }
+  };
+
+  renderer.domElement.addEventListener("pointerdown", handlePointerDown);
+  window.addEventListener("keydown", handleKeyDown);
+
+  const destroy = () => {
+    tc.removeEventListener("object-change", handleObjectChange);
+    tc.removeEventListener("dragging-changed", handleDraggingChanged);
+    renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
+    window.removeEventListener("keydown", handleKeyDown);
+    tc.detach();
+    tc.dispose();
+    scene.remove(tc);
+  };
+
+  return { controls: tc, destroy };
 }
