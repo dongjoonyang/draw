@@ -166,6 +166,7 @@ export default function PoseOverlay({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const bundleRef = useRef<SceneBundle | null>(null);
+  const isDraggingRef = useRef(false);
   const rafRef = useRef<number | null>(null);
   const manualRef = useRef<Record<BoxKey, ManualTransform>>(createManualMap());
   /** 매 프레임 updateMeshes가 기록하는 기저 변환 */
@@ -560,6 +561,11 @@ export default function PoseOverlay({
           quaternion: baseQuat.clone(),
           scale: new THREE.Vector3(bx, by, bz),
         };
+
+        if (isDraggingRef.current && currentSelectedKey === box.key) {
+          return;
+        }
+
         box.mesh.position.copy(basePos).add(manual.positionOffset);
         box.mesh.quaternion.copy(baseQuat).multiply(manual.rotationOffset);
         box.mesh.scale.set(
@@ -645,8 +651,12 @@ export default function PoseOverlay({
           quaternion: baseQuat.clone(),
           scale: new THREE.Vector3(thick, length, thick),
         };
-
         box.mesh.visible = boxRenderMode !== "off";
+
+        if (isDraggingRef.current && currentSelectedKey === box.key) {
+          return;
+        }
+
         box.mesh.position.copy(basePos).add(manual.positionOffset);
         box.mesh.quaternion.copy(baseQuat).multiply(manual.rotationOffset);
         box.mesh.scale.set(
@@ -694,6 +704,7 @@ export default function PoseOverlay({
       onModeChange: setGizmoMode,
       onSelectChange: setSelectedKey,
       onBoxUpdate,
+      isDraggingRef,
     });
 
     // ── 렌더 루프 ─────────────────────────────────────────────────────────
@@ -821,6 +832,7 @@ type GizmoControllerParams = {
   onModeChange: (mode: GizmoMode) => void;
   onSelectChange: (key: BoxKey | null) => void;
   onBoxUpdate?: (info: BoxUpdateInfo) => void;
+  isDraggingRef: React.MutableRefObject<boolean>;
 };
 
 function setupGizmoController({
@@ -834,57 +846,54 @@ function setupGizmoController({
   onModeChange,
   onSelectChange,
   onBoxUpdate,
+  isDraggingRef,
 }: GizmoControllerParams): { controls: TransformControls; destroy: () => void } {
   const tc = new TransformControls(camera, renderer.domElement);
   tc.setSize(0.8);
   scene.add(tc);
 
-  // 현재 선택된 박스 키 (이 함수 스코프 내에서 공유)
   let selectedKey: BoxKey | null = null;
-  let currentMode: GizmoMode = "translate";
 
-  // ── object-change: TC가 메시를 변환할 때 manualRef를 역산해 동기화 ──
-  const handleObjectChange = (_event: THREE.Event<"object-change", TransformControls>) => {
-    if (!selectedKey) return;
-    const base = baseTransformsRef.current[selectedKey];
-    const bundle = bundleRef.current;
-    if (!base || !bundle) return;
-
-    const box = getBoxVisualByKey(bundle, selectedKey);
-    if (!box) return;
-    const mesh = box.mesh;
-    const manual = manualRef.current[selectedKey];
-
-    // position: mesh.pos = basePos + offset  →  offset = mesh.pos - basePos
-    manual.positionOffset.copy(mesh.position).sub(base.position);
-
-    // quaternion: mesh.quat = baseQuat * rotOffset  →  rotOffset = baseQuat⁻¹ * mesh.quat
-    manual.rotationOffset.copy(base.quaternion).invert().multiply(mesh.quaternion);
-
-    // scale: mesh.scale = base.scale * scaleVec (component-wise)
-    manual.scaleVec.set(
-      base.scale.x > 0 ? mesh.scale.x / base.scale.x : 1,
-      base.scale.y > 0 ? mesh.scale.y / base.scale.y : 1,
-      base.scale.z > 0 ? mesh.scale.z / base.scale.z : 1
-    );
-
-    onBoxUpdate?.({
-      key: selectedKey,
-      positionOffset: manual.positionOffset.clone(),
-      rotationOffset: manual.rotationOffset.clone(),
-      scaleVec: manual.scaleVec.clone(),
-    });
-  };
-
-  // ── dragging-changed: 아이패드 스크롤 방지 ────────────────────────────
   const handleDraggingChanged = (
     event: THREE.Event<"dragging-changed", TransformControls> & { value: unknown }
   ) => {
     const isDragging = !!event.value;
+    isDraggingRef.current = isDragging;
     renderer.domElement.style.touchAction = isDragging ? "none" : "auto";
+
+    // 드래그가 끝났을 때만 수동 보정값을 업데이트
+    if (!isDragging && selectedKey) {
+      const base = baseTransformsRef.current[selectedKey];
+      const bundle = bundleRef.current;
+      if (!base || !bundle) return;
+
+      const box = getBoxVisualByKey(bundle, selectedKey);
+      if (!box) return;
+      const mesh = box.mesh;
+      const manual = manualRef.current[selectedKey];
+
+      // position: mesh.pos = basePos + offset  →  offset = mesh.pos - basePos
+      manual.positionOffset.copy(mesh.position).sub(base.position);
+
+      // quaternion: mesh.quat = baseQuat * rotOffset  →  rotOffset = baseQuat⁻¹ * mesh.quat
+      manual.rotationOffset.copy(base.quaternion).invert().multiply(mesh.quaternion);
+
+      // scale: mesh.scale = base.scale * scaleVec (component-wise)
+      manual.scaleVec.set(
+        base.scale.x !== 0 ? mesh.scale.x / base.scale.x : 1,
+        base.scale.y !== 0 ? mesh.scale.y / base.scale.y : 1,
+        base.scale.z !== 0 ? mesh.scale.z / base.scale.z : 1
+      );
+
+      onBoxUpdate?.({
+        key: selectedKey,
+        positionOffset: manual.positionOffset.clone(),
+        rotationOffset: manual.rotationOffset.clone(),
+        scaleVec: manual.scaleVec.clone(),
+      });
+    }
   };
 
-  tc.addEventListener("object-change", handleObjectChange);
   tc.addEventListener("dragging-changed", handleDraggingChanged);
 
   // ── 박스 클릭으로 선택 ────────────────────────────────────────────────
@@ -898,8 +907,7 @@ function setupGizmoController({
 
   const handlePointerDown = (event: PointerEvent) => {
     if (event.button !== 0) return;
-    // TC가 드래그 중이면 박스 선택 로직 스킵
-    if (tc.dragging) return;
+    if ((tc as any).axis) return;
 
     const ndc = getPointerNdc(event);
     const raycaster = new THREE.Raycaster();
@@ -909,20 +917,31 @@ function setupGizmoController({
     const targets = boxes.map((b) => b.mesh);
     const hits = raycaster.intersectObjects(targets, false);
 
-    if (hits.length > 0) {
-      const picked = boxes.find((b) => b.mesh === hits[0].object);
-      if (picked && picked.key !== selectedKey) {
-        selectedKey = picked.key;
-        // ref를 통해 tick 루프에도 전달
+    if (hits.length === 0) {
+      if (selectedKey) {
+        selectedKey = null;
         const tcAny = tc as unknown as { _poseOverlaySelectedRef?: { current: BoxKey | null } };
-        if (tcAny._poseOverlaySelectedRef) tcAny._poseOverlaySelectedRef.current = selectedKey;
-        tc.attach(picked.mesh);
-        tc.setMode(currentMode);
-        onSelectChange(selectedKey);
+        if (tcAny._poseOverlaySelectedRef) tcAny._poseOverlaySelectedRef.current = null;
+        tc.detach();
+        onSelectChange(null);
       }
+      return;
     }
-    // 빈 공간 클릭 시 선택 해제하지 않음 (Escape로 해제)
+
+    const picked = boxes.find((b) => b.mesh === hits[0].object);
+    if (!picked) return;
+
+    if (picked.key !== selectedKey) {
+      selectedKey = picked.key;
+      const tcAny = tc as unknown as { _poseOverlaySelectedRef?: { current: BoxKey | null } };
+      if (tcAny._poseOverlaySelectedRef) {
+        tcAny._poseOverlaySelectedRef.current = selectedKey;
+      }
+      tc.attach(picked.mesh);
+      onSelectChange(selectedKey);
+    }
   };
+
 
   // ── 키보드 단축키: T/R/S/Escape ──────────────────────────────────────
   const handleKeyDown = (e: KeyboardEvent) => {
@@ -930,17 +949,14 @@ function setupGizmoController({
 
     switch (e.key.toLowerCase()) {
       case "t":
-        currentMode = "translate";
         tc.setMode("translate");
         onModeChange("translate");
         break;
       case "r":
-        currentMode = "rotate";
         tc.setMode("rotate");
         onModeChange("rotate");
         break;
       case "s":
-        currentMode = "scale";
         tc.setMode("scale");
         onModeChange("scale");
         break;
@@ -958,7 +974,6 @@ function setupGizmoController({
   window.addEventListener("keydown", handleKeyDown);
 
   const destroy = () => {
-    tc.removeEventListener("object-change", handleObjectChange);
     tc.removeEventListener("dragging-changed", handleDraggingChanged);
     renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
     window.removeEventListener("keydown", handleKeyDown);
