@@ -775,7 +775,7 @@ export default function PoseOverlay({
         src={imageSrc}
         alt="인체 드로잉 참조"
         className="max-h-[92vh] w-auto object-contain"
-        style={{ filter: "grayscale(100%) contrast(1.1)" }}
+        style={{ filter: "contrast(1.05)" }}
       />
 
       {showSkeleton && (
