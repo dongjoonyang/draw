@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import Timer from "@/components/Timer";
-import PoseOverlay from "@/components/PoseOverlay";
+import PoseOverlay, { BoxKey } from "@/components/PoseOverlay";
 import { getTodayRecord, savePracticeRecord } from "@/lib/storage";
 
 const TOTAL_SECONDS = 3 * 60;
@@ -29,8 +29,8 @@ export default function Home() {
   const [darkMode, setDarkMode] = useState(false);
 
   const [boxOpacity, setBoxOpacity] = useState(1);
-  const [enable3DBox, setEnable3DBox] = useState(true);
   const [boxRenderMode, setBoxRenderMode] = useState<BoxRenderMode>("wire");
+  const [selectedBoxKey, setSelectedBoxKey] = useState<BoxKey | null>(null);
   const [ribcageScale, setRibcageScale] = useState(1.15);
   const [ribHeightScale, setRibHeightScale] = useState(1);
   const [waistScale, setWaistScale] = useState(1.0);
@@ -106,13 +106,9 @@ export default function Home() {
     setGuideMode("none");
   };
 
-  const activateStep2 = () => {
-    setGuideMode("box");
-    setEnable3DBox(true);
-    if (boxRenderMode === "off") {
-      setBoxRenderMode("wire");
-    }
-  };
+  useEffect(() => {
+    if (guideMode !== "box") setSelectedBoxKey(null);
+  }, [guideMode]);
 
   const currentPhoto = photos[currentIndex];
   const todayRecord = getTodayRecord();
@@ -168,7 +164,7 @@ export default function Home() {
                     imageSrc={currentPhoto.urls.full ?? currentPhoto.urls.regular}
                     guideMode={guideMode}
                     boxOpacity={boxOpacity}
-                    enable3DBox={enable3DBox}
+                    enable3DBox={true}
                     boxRenderMode={boxRenderMode}
                     ribcageScale={ribcageScale}
                     ribHeightScale={ribHeightScale}
@@ -181,6 +177,7 @@ export default function Home() {
                     lowerArmThickness={lowerArmThickness}
                     thighThickness={thighThickness}
                     calfThickness={calfThickness}
+                    onSelectedKeyChange={setSelectedBoxKey}
                   />
                   {photos.length > 0 && (
                     <>
@@ -211,23 +208,12 @@ export default function Home() {
 
           <aside className="lg:w-80 lg:shrink-0">
             <div className="sticky top-6 space-y-8 rounded-xl border border-ink/10 bg-white/50 p-7 dark:border-ink-dark/10 dark:bg-black/20">
-              <div>
-                <h2 className="mb-4 text-sm font-medium text-muted">3분 연습 타이머</h2>
-                <Timer
-                  secondsLeft={secondsLeft}
-                  isRunning={isRunning}
-                  onStart={handleStart}
-                  onPause={handlePause}
-                  onReset={handleReset}
-                />
-              </div>
-
               <div className="border-t border-ink/10 pt-6 dark:border-ink-dark/10">
                 <p className="mb-3 text-xs font-medium text-muted">가이드 모드</p>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex gap-1">
                   <button
                     onClick={() => setGuideMode("none")}
-                    className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${
                       guideMode === "none"
                         ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
                         : "border border-ink/30 bg-transparent hover:bg-ink/5 dark:border-ink-dark/30"
@@ -237,7 +223,7 @@ export default function Home() {
                   </button>
                   <button
                     onClick={() => setGuideMode("skeleton")}
-                    className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${
                       guideMode === "skeleton"
                         ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
                         : "border border-ink/30 bg-transparent hover:bg-ink/5 dark:border-ink-dark/30"
@@ -246,8 +232,8 @@ export default function Home() {
                     1단계 스켈레톤
                   </button>
                   <button
-                    onClick={activateStep2}
-                    className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    onClick={() => { setGuideMode("box"); if (boxRenderMode === "off") setBoxRenderMode("wire"); }}
+                    className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${
                       guideMode === "box"
                         ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
                         : "border border-ink/30 bg-transparent hover:bg-ink/5 dark:border-ink-dark/30"
@@ -257,24 +243,8 @@ export default function Home() {
                   </button>
                 </div>
 
-                <div className="mt-3">
-                  <button
-                    onClick={() => setEnable3DBox((v) => !v)}
-                    className={`w-full rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
-                      enable3DBox
-                        ? "bg-blue-600 text-white"
-                        : "border border-ink/30 bg-transparent hover:bg-ink/5 dark:border-ink-dark/30"
-                    }`}
-                  >
-                    3D 박스 {enable3DBox ? "ON" : "OFF"}
-                  </button>
-                </div>
-
-                {guideMode === "box" && enable3DBox && (
+                {guideMode === "box" && (
                   <div className="mt-4 space-y-3">
-                    <p className="text-[11px] leading-relaxed text-muted">
-                      조작: 박스 클릭 선택 · 좌클릭 드래그 이동 · 우클릭 드래그 회전 · 마우스 휠 크기 조절
-                    </p>
                     <div>
                       <p className="mb-1 block text-xs text-muted">3D 가이드 표시</p>
                       <div className="grid grid-cols-3 gap-2">
@@ -324,90 +294,102 @@ export default function Home() {
                         className="w-full accent-ink dark:accent-ink-dark"
                       />
                     </div>
-                    <div>
-                      <label className="mb-1 block text-xs text-muted">
-                        가슴 박스 크기: {ribcageScale.toFixed(2)}x
-                      </label>
-                      <input
-                        type="range"
-                        min="0.7"
-                        max="1.5"
-                        step="0.05"
-                        value={ribcageScale}
-                        onChange={(e) => setRibcageScale(parseFloat(e.target.value))}
-                        className="w-full accent-blue-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs text-muted">
-                        가슴 박스 높이: {ribHeightScale.toFixed(2)}x
-                      </label>
-                      <input
-                        type="range"
-                        min="0.6"
-                        max="1.6"
-                        step="0.05"
-                        value={ribHeightScale}
-                        onChange={(e) => setRibHeightScale(parseFloat(e.target.value))}
-                        className="w-full accent-cyan-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs text-muted">
-                        허리 박스 크기: {waistScale.toFixed(2)}x
-                      </label>
-                      <input
-                        type="range"
-                        min="0.7"
-                        max="1.5"
-                        step="0.05"
-                        value={waistScale}
-                        onChange={(e) => setWaistScale(parseFloat(e.target.value))}
-                        className="w-full accent-violet-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs text-muted">
-                        허리 박스 높이: {waistHeightScale.toFixed(2)}x
-                      </label>
-                      <input
-                        type="range"
-                        min="0.6"
-                        max="1.6"
-                        step="0.05"
-                        value={waistHeightScale}
-                        onChange={(e) => setWaistHeightScale(parseFloat(e.target.value))}
-                        className="w-full accent-purple-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs text-muted">
-                        골반 박스 크기: {pelvisScale.toFixed(2)}x
-                      </label>
-                      <input
-                        type="range"
-                        min="0.7"
-                        max="1.5"
-                        step="0.05"
-                        value={pelvisScale}
-                        onChange={(e) => setPelvisScale(parseFloat(e.target.value))}
-                        className="w-full accent-yellow-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs text-muted">
-                        골반 박스 높이: {pelvisHeightScale.toFixed(2)}x
-                      </label>
-                      <input
-                        type="range"
-                        min="0.6"
-                        max="1.6"
-                        step="0.05"
-                        value={pelvisHeightScale}
-                        onChange={(e) => setPelvisHeightScale(parseFloat(e.target.value))}
-                        className="w-full accent-orange-500"
-                      />
-                    </div>
+                    {selectedBoxKey === "rib" && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-xs text-muted">
+                            가슴 박스 크기: {ribcageScale.toFixed(2)}x
+                          </label>
+                          <input
+                            type="range"
+                            min="0.7"
+                            max="1.5"
+                            step="0.05"
+                            value={ribcageScale}
+                            onChange={(e) => setRibcageScale(parseFloat(e.target.value))}
+                            className="w-full accent-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-muted">
+                            가슴 박스 높이: {ribHeightScale.toFixed(2)}x
+                          </label>
+                          <input
+                            type="range"
+                            min="0.6"
+                            max="1.6"
+                            step="0.05"
+                            value={ribHeightScale}
+                            onChange={(e) => setRibHeightScale(parseFloat(e.target.value))}
+                            className="w-full accent-cyan-500"
+                          />
+                        </div>
+                      </>
+                    )}
+                    {selectedBoxKey === "waist" && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-xs text-muted">
+                            허리 박스 크기: {waistScale.toFixed(2)}x
+                          </label>
+                          <input
+                            type="range"
+                            min="0.7"
+                            max="1.5"
+                            step="0.05"
+                            value={waistScale}
+                            onChange={(e) => setWaistScale(parseFloat(e.target.value))}
+                            className="w-full accent-violet-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-muted">
+                            허리 박스 높이: {waistHeightScale.toFixed(2)}x
+                          </label>
+                          <input
+                            type="range"
+                            min="0.6"
+                            max="1.6"
+                            step="0.05"
+                            value={waistHeightScale}
+                            onChange={(e) => setWaistHeightScale(parseFloat(e.target.value))}
+                            className="w-full accent-purple-500"
+                          />
+                        </div>
+                      </>
+                    )}
+                    {selectedBoxKey === "pelvis" && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-xs text-muted">
+                            골반 박스 크기: {pelvisScale.toFixed(2)}x
+                          </label>
+                          <input
+                            type="range"
+                            min="0.7"
+                            max="1.5"
+                            step="0.05"
+                            value={pelvisScale}
+                            onChange={(e) => setPelvisScale(parseFloat(e.target.value))}
+                            className="w-full accent-yellow-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-muted">
+                            골반 박스 높이: {pelvisHeightScale.toFixed(2)}x
+                          </label>
+                          <input
+                            type="range"
+                            min="0.6"
+                            max="1.6"
+                            step="0.05"
+                            value={pelvisHeightScale}
+                            onChange={(e) => setPelvisHeightScale(parseFloat(e.target.value))}
+                            className="w-full accent-orange-500"
+                          />
+                        </div>
+                      </>
+                    )}
                     <div>
                       <label className="mb-1 block text-xs text-muted">
                         박스 두께: {boxThickness.toFixed(2)}

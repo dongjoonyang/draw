@@ -37,6 +37,8 @@ type Props = {
   onLandmarks?: (landmarks: PoseLandmarks | null) => void;
   /** 기즈모로 박스 변환 시 부모에게 변경값 전달 */
   onBoxUpdate?: (info: BoxUpdateInfo) => void;
+  /** 선택된 박스 키 변경 시 부모에게 전달 */
+  onSelectedKeyChange?: (key: BoxKey | null) => void;
 };
 
 // ── Pose landmark indices ────────────────────────────────────────────────────
@@ -154,6 +156,7 @@ export default function PoseOverlay({
   calfThickness = 0.88,
   onLandmarks,
   onBoxUpdate,
+  onSelectedKeyChange,
 }: Props) {
   const skeletonCanvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -185,6 +188,10 @@ export default function PoseOverlay({
   useEffect(() => {
     landmarksRef.current = landmarks;
   }, [landmarks]);
+
+  useEffect(() => {
+    onSelectedKeyChange?.(selectedKey);
+  }, [selectedKey, onSelectedKeyChange]);
 
   // ── MediaPipe 포즈 분석 ──────────────────────────────────────────────────
   useEffect(() => {
