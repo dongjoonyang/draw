@@ -54,13 +54,12 @@ export default function DashboardPage() {
 
     poseSeries.columns.template.setAll({
       tooltipText: "{categoryX}: {valueY}회",
-      cornerRadiusBL: 4,
-      cornerRadiusBR: 4,
+      cornerRadiusTL: 4,
+      cornerRadiusTR: 4,
     });
 
-    poseSeries.columns.template.adapters.add("fill", (_, target) => {
-      return am5.color(0x3b82f6);
-    });
+    poseSeries.columns.template.adapters.add("fill", () => am5.color(0x7966f8));
+    poseSeries.columns.template.adapters.add("stroke", () => am5.color(0x7966f8));
 
     const data = records.map((r) => ({
       date: r.date.slice(5),
@@ -77,51 +76,68 @@ export default function DashboardPage() {
   const totalPoses = records.reduce((s, r) => s + r.poseCount, 0);
   const totalMinutes = records.reduce((s, r) => s + r.totalMinutes, 0);
 
+  const stats = [
+    { label: "총 포즈", value: `${totalPoses}회` },
+    { label: "총 연습 시간", value: `${totalMinutes}분` },
+    { label: "연습 일수", value: `${records.length}일` },
+    {
+      label: "평균/일",
+      value: `${records.length ? Math.round(totalPoses / records.length) : 0}회`,
+    },
+  ];
+
   return (
-    <main className="min-h-screen bg-paper dark:bg-paper-dark">
-      <header className="border-b border-ink/10 px-6 py-4 dark:border-ink-dark/10">
-        <div className="mx-auto flex max-w-6xl items-center justify-between">
-          <Link href="/" className="text-lg font-semibold tracking-tight text-ink dark:text-ink-dark">
-            ← 인체 도형화 · 성장의 기록
+    <main className="min-h-screen bg-paper">
+      {/* Header */}
+      <header className="flex h-12 items-center border-b border-ink/[0.06] bg-paper px-5">
+        <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
+          <Link
+            href="/"
+            className="flex items-center gap-2 text-sm text-ink/50 transition-colors hover:text-ink/80"
+          >
+            <span className="text-base">←</span>
+            <span>돌아가기</span>
           </Link>
-          <h1 className="text-lg font-semibold text-ink dark:text-ink-dark">
-            내가 심은 잔디
-          </h1>
+          <div className="flex items-center gap-2.5">
+            <div className="h-5 w-5 rounded-md bg-gradient-to-br from-violet-500 to-indigo-600 shadow-sm shadow-violet-500/40" />
+            <h1 className="text-sm font-semibold tracking-tight text-ink">
+              성장의 기록
+            </h1>
+          </div>
         </div>
       </header>
 
-      <div className="mx-auto max-w-6xl px-6 py-8">
-        <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
-          <div className="rounded-xl border border-ink/10 bg-white/50 p-6 dark:border-ink-dark/10 dark:bg-black/20">
-            <p className="text-sm text-muted">총 포즈</p>
-            <p className="mt-1 text-2xl font-bold text-ink dark:text-ink-dark">{totalPoses}회</p>
-          </div>
-          <div className="rounded-xl border border-ink/10 bg-white/50 p-6 dark:border-ink-dark/10 dark:bg-black/20">
-            <p className="text-sm text-muted">총 연습 시간</p>
-            <p className="mt-1 text-2xl font-bold text-ink dark:text-ink-dark">{totalMinutes}분</p>
-          </div>
-          <div className="rounded-xl border border-ink/10 bg-white/50 p-6 dark:border-ink-dark/10 dark:bg-black/20">
-            <p className="text-sm text-muted">연습 일수</p>
-            <p className="mt-1 text-2xl font-bold text-ink dark:text-ink-dark">{records.length}일</p>
-          </div>
-          <div className="rounded-xl border border-ink/10 bg-white/50 p-6 dark:border-ink-dark/10 dark:bg-black/20">
-            <p className="text-sm text-muted">평균/일</p>
-            <p className="mt-1 text-2xl font-bold text-ink dark:text-ink-dark">
-              {records.length ? Math.round(totalPoses / records.length) : 0}회
-            </p>
-          </div>
+      <div className="mx-auto max-w-5xl px-5 py-8">
+        {/* Stats grid */}
+        <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
+          {stats.map(({ label, value }) => (
+            <div
+              key={label}
+              className="rounded-xl border border-ink/[0.06] bg-white/60 p-5"
+            >
+              <p className="text-xs text-ink/40">{label}</p>
+              <p className="mt-1.5 text-2xl font-bold text-ink">{value}</p>
+            </div>
+          ))}
         </div>
 
-        <div className="rounded-xl border border-ink/10 bg-white/50 p-6 dark:border-ink-dark/10 dark:bg-black/20">
-          <h2 className="mb-4 text-lg font-semibold text-ink dark:text-ink-dark">
-            주간 연습량
-          </h2>
+        {/* Chart */}
+        <div className="rounded-xl border border-ink/[0.06] bg-white/60 p-6">
+          <h2 className="mb-1 text-sm font-semibold text-ink">주간 연습량</h2>
+          <p className="mb-5 text-xs text-ink/40">날짜별 포즈 횟수</p>
           {records.length === 0 ? (
-            <div className="flex min-h-[300px] items-center justify-center text-muted">
-              아직 연습 기록이 없습니다. 메인에서 연습을 시작해보세요.
+            <div className="flex min-h-[300px] flex-col items-center justify-center gap-3">
+              <div className="text-3xl opacity-20">📊</div>
+              <p className="text-sm text-ink/30">아직 연습 기록이 없습니다</p>
+              <Link
+                href="/"
+                className="rounded-lg bg-accent px-4 py-2 text-xs font-medium text-white shadow-sm shadow-accent/30 hover:opacity-90"
+              >
+                연습 시작하기
+              </Link>
             </div>
           ) : (
-            <div ref={chartRef} className="h-[400px] w-full" />
+            <div ref={chartRef} className="h-[360px] w-full" />
           )}
         </div>
       </div>

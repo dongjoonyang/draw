@@ -6,15 +6,13 @@ const config: Config = {
     "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
-  darkMode: "class",
   theme: {
     extend: {
       colors: {
         ink: "#1a1a1a",
-        paper: "#f8f6f3",
-        "ink-dark": "#e8e6e3",
-        "paper-dark": "#121212",
-        muted: "#6b7280",
+        paper: "#f5f4f2",
+        muted: "#9ca3af",
+        accent: "#7966f8",
       },
     },
   },

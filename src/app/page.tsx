@@ -2,11 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import Timer from "@/components/Timer";
 import PoseOverlay, { BoxKey } from "@/components/PoseOverlay";
-import { getTodayRecord, savePracticeRecord } from "@/lib/storage";
-
-const TOTAL_SECONDS = 3 * 60;
+import { getTodayRecord } from "@/lib/storage";
 
 type GuideMode = "none" | "skeleton" | "box";
 type BoxRenderMode = "off" | "wire" | "solid";
@@ -18,15 +15,48 @@ type UnsplashPhoto = {
   alt_description?: string;
 };
 
+function SliderRow({
+  label,
+  value,
+  min,
+  max,
+  step = 0.05,
+  accent = "accent-violet-500",
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  accent?: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="mb-3">
+      <label className="mb-1.5 flex justify-between text-[11px] text-ink/50">
+        <span>{label}</span>
+        <span className="tabular-nums">{value.toFixed(2)}</span>
+      </label>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        className={`w-full ${accent}`}
+      />
+    </div>
+  );
+}
+
 export default function Home() {
   const [photos, setPhotos] = useState<UnsplashPhoto[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [secondsLeft, setSecondsLeft] = useState(TOTAL_SECONDS);
-  const [isRunning, setIsRunning] = useState(false);
+  const [selectedPhoto, setSelectedPhoto] = useState<UnsplashPhoto | null>(null);
   const [guideMode, setGuideMode] = useState<GuideMode>("none");
-  const [darkMode, setDarkMode] = useState(false);
 
   const [boxOpacity, setBoxOpacity] = useState(1);
   const [boxRenderMode, setBoxRenderMode] = useState<BoxRenderMode>("wire");
@@ -52,7 +82,6 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to fetch");
       setPhotos(Array.isArray(data) ? data : []);
-      setCurrentIndex(0);
     } catch (e) {
       setError(e instanceof Error ? e.message : "사진을 불러올 수 없습니다.");
       setPhotos([]);
@@ -66,408 +95,267 @@ export default function Home() {
   }, [fetchPhotos]);
 
   useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
-  }, [darkMode]);
-
-  useEffect(() => {
-    if (!isRunning || secondsLeft <= 0) return;
-    const id = setInterval(() => setSecondsLeft((s) => (s <= 0 ? 0 : s - 1)), 1000);
-    return () => clearInterval(id);
-  }, [isRunning, secondsLeft]);
-
-  const handleTimerComplete = useCallback(() => {
-    setIsRunning(false);
-    setGuideMode("skeleton");
-    const today = new Date().toISOString().slice(0, 10);
-    savePracticeRecord({
-      date: today,
-      poseCount: 1,
-      totalMinutes: 3,
-    });
-  }, []);
-
-  useEffect(() => {
-    if (secondsLeft === 0 && isRunning) {
-      setIsRunning(false);
-      handleTimerComplete();
-    }
-  }, [secondsLeft, isRunning, handleTimerComplete]);
-
-  const handleStart = () => setIsRunning(true);
-  const handlePause = () => setIsRunning(false);
-
-  const handleReset = () => {
-    setIsRunning(false);
-    setSecondsLeft(TOTAL_SECONDS);
-    setGuideMode("none");
-  };
-
-  useEffect(() => {
     if (guideMode !== "box") setSelectedBoxKey(null);
   }, [guideMode]);
 
-  const currentPhoto = photos[currentIndex];
+  const handleSelectPhoto = (photo: UnsplashPhoto) => {
+    setSelectedPhoto(photo);
+    setGuideMode("none");
+  };
+
+  const handleBack = () => {
+    setSelectedPhoto(null);
+    setGuideMode("none");
+  };
+
   const todayRecord = getTodayRecord();
 
-  return (
-    <main className="min-h-screen bg-paper dark:bg-paper-dark">
-      <header className="border-b border-ink/10 px-6 py-4 dark:border-ink-dark/10">
-        <div className="mx-auto flex w-full max-w-[1800px] items-center justify-between">
-          <h1 className="text-lg font-semibold tracking-tight text-ink dark:text-ink-dark">
-            인체 도형화 · 성장의 기록
-          </h1>
-          <div className="flex items-center gap-4">
+  const guideTabs: { key: GuideMode; label: string }[] = [
+    { key: "none", label: "기본 사진" },
+    { key: "skeleton", label: "스켈레톤" },
+    { key: "box", label: "도형화" },
+  ];
+
+  /* ─────────────────────── EDITOR VIEW ─────────────────────────────────── */
+  if (selectedPhoto) {
+    return (
+      <main className="flex h-screen flex-col overflow-hidden bg-paper">
+        <header className="flex h-12 shrink-0 items-center border-b border-ink/[0.06] bg-paper px-4">
+          <div className="flex w-52 shrink-0 items-center">
+            <button
+              onClick={handleBack}
+              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-ink/50 transition-colors hover:bg-ink/5 hover:text-ink/80"
+            >
+              <span className="text-base leading-none">←</span>
+              <span>목록</span>
+            </button>
+          </div>
+
+          <div className="flex flex-1 justify-center">
+            <div className="flex items-center gap-0.5 rounded-lg bg-ink/10 p-0.5">
+              {guideTabs.map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => {
+                    setGuideMode(key);
+                    if (key === "box" && boxRenderMode === "off") setBoxRenderMode("wire");
+                  }}
+                  className={`rounded-md px-4 py-1.5 text-xs font-medium transition-all ${
+                    guideMode === key
+                      ? "bg-white text-accent shadow-sm"
+                      : "text-ink/60 hover:text-ink hover:bg-ink/[0.06]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex w-52 shrink-0 items-center justify-end gap-2">
+            <span className="text-[11px] text-ink/40">
+              오늘 {todayRecord?.poseCount ?? 0}회
+            </span>
             <Link
               href="/dashboard"
-              className="text-sm text-muted hover:text-ink dark:hover:text-ink-dark"
+              className="rounded-md px-3 py-1.5 text-xs text-ink/50 transition-colors hover:text-ink/80"
             >
               대시보드
             </Link>
-            <span className="text-sm text-muted">
-              오늘 {todayRecord?.poseCount ?? 0}회 · {todayRecord?.totalMinutes ?? 0}분
-            </span>
-            <button
-              onClick={() => setDarkMode((d) => !d)}
-              className="rounded-lg border border-ink/20 px-3 py-1.5 text-sm dark:border-ink-dark/20"
-            >
-              {darkMode ? "라이트" : "다크"}
-            </button>
           </div>
+        </header>
+
+        <div className="flex flex-1 overflow-hidden">
+          <section className="relative flex flex-1 items-center justify-center overflow-hidden bg-ink/[0.03]">
+            <PoseOverlay
+              imageSrc={selectedPhoto.urls.full ?? selectedPhoto.urls.regular}
+              guideMode={guideMode}
+              boxOpacity={boxOpacity}
+              enable3DBox={true}
+              boxRenderMode={boxRenderMode}
+              ribcageScale={ribcageScale}
+              ribHeightScale={ribHeightScale}
+              waistScale={waistScale}
+              waistHeightScale={waistHeightScale}
+              pelvisScale={pelvisScale}
+              pelvisHeightScale={pelvisHeightScale}
+              boxThickness={boxThickness}
+              upperArmThickness={upperArmThickness}
+              lowerArmThickness={lowerArmThickness}
+              thighThickness={thighThickness}
+              calfThickness={calfThickness}
+              onSelectedKeyChange={setSelectedBoxKey}
+            />
+          </section>
+
+          <aside className="flex w-72 shrink-0 flex-col overflow-hidden border-l border-ink/[0.06] bg-paper">
+            <div className="border-b border-ink/[0.06] p-5">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-ink/30">
+                사진
+              </p>
+              <p className="text-[10px] text-ink/30">
+                © {selectedPhoto.user.name} / Unsplash
+              </p>
+            </div>
+
+            {guideMode === "box" && (
+              <div className="flex-1 overflow-y-auto p-5">
+                <p className="mb-4 text-[10px] font-semibold uppercase tracking-widest text-ink/30">
+                  도형 설정
+                </p>
+
+                <div className="mb-4">
+                  <p className="mb-2 text-[11px] text-ink/50">3D 가이드</p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(
+                      [
+                        { v: "off", label: "끄기" },
+                        { v: "wire", label: "선" },
+                        { v: "solid", label: "면" },
+                      ] as { v: BoxRenderMode; label: string }[]
+                    ).map(({ v, label }) => (
+                      <button
+                        key={v}
+                        onClick={() => setBoxRenderMode(v)}
+                        className={`rounded-md py-1.5 text-xs font-medium transition-all ${
+                          boxRenderMode === v
+                            ? "bg-white text-accent shadow-sm"
+                            : "border border-ink/10 text-ink/50 hover:bg-ink/5"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <SliderRow label="박스 투명도" value={boxOpacity} min={0.3} max={1} accent="accent-violet-500" onChange={setBoxOpacity} />
+
+                {selectedBoxKey === "rib" && (
+                  <>
+                    <div className="my-3 text-[10px] font-semibold uppercase tracking-widest text-violet-500/70">가슴</div>
+                    <SliderRow label="크기" value={ribcageScale} min={0.7} max={1.5} accent="accent-indigo-500" onChange={setRibcageScale} />
+                    <SliderRow label="높이" value={ribHeightScale} min={0.6} max={1.6} accent="accent-cyan-500" onChange={setRibHeightScale} />
+                  </>
+                )}
+                {selectedBoxKey === "waist" && (
+                  <>
+                    <div className="my-3 text-[10px] font-semibold uppercase tracking-widest text-violet-500/70">허리</div>
+                    <SliderRow label="크기" value={waistScale} min={0.7} max={1.5} accent="accent-purple-500" onChange={setWaistScale} />
+                    <SliderRow label="높이" value={waistHeightScale} min={0.6} max={1.6} accent="accent-fuchsia-500" onChange={setWaistHeightScale} />
+                  </>
+                )}
+                {selectedBoxKey === "pelvis" && (
+                  <>
+                    <div className="my-3 text-[10px] font-semibold uppercase tracking-widest text-violet-500/70">골반</div>
+                    <SliderRow label="크기" value={pelvisScale} min={0.7} max={1.5} accent="accent-yellow-500" onChange={setPelvisScale} />
+                    <SliderRow label="높이" value={pelvisHeightScale} min={0.6} max={1.6} accent="accent-orange-500" onChange={setPelvisHeightScale} />
+                  </>
+                )}
+
+                <div className="my-3 text-[10px] font-semibold uppercase tracking-widest text-ink/30">두께</div>
+                <SliderRow label="박스" value={boxThickness} min={0.15} max={0.8} accent="accent-emerald-500" onChange={setBoxThickness} />
+                <SliderRow label="상완" value={upperArmThickness} min={0.5} max={1.4} accent="accent-sky-500" onChange={setUpperArmThickness} />
+                <SliderRow label="하완" value={lowerArmThickness} min={0.5} max={1.4} accent="accent-blue-500" onChange={setLowerArmThickness} />
+                <SliderRow label="허벅지" value={thighThickness} min={0.5} max={1.4} accent="accent-amber-500" onChange={setThighThickness} />
+                <SliderRow label="종아리" value={calfThickness} min={0.5} max={1.4} accent="accent-rose-500" onChange={setCalfThickness} />
+              </div>
+            )}
+
+            {guideMode !== "box" && (
+              <div className="flex flex-1 items-center justify-center p-5">
+                <p className="text-center text-xs text-ink/25">
+                  {guideMode === "none"
+                    ? "상단에서 가이드 모드를 선택하세요"
+                    : "도형화 모드에서 상세 설정을 조절할 수 있습니다"}
+                </p>
+              </div>
+            )}
+          </aside>
+        </div>
+      </main>
+    );
+  }
+
+  /* ─────────────────────── GRID VIEW ───────────────────────────────────── */
+  return (
+    <main className="flex h-screen flex-col overflow-hidden bg-paper">
+      <header className="flex h-12 shrink-0 items-center border-b border-ink/[0.06] bg-paper px-5">
+        <div className="flex flex-1 items-center gap-2.5">
+          <div className="h-6 w-6 rounded-md bg-gradient-to-br from-violet-500 to-indigo-600 shadow-md shadow-violet-500/40" />
+          <span className="text-sm font-semibold tracking-tight text-ink">Draw Dream</span>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] text-ink/40">
+            오늘 {todayRecord?.poseCount ?? 0}회
+          </span>
+          <Link
+            href="/dashboard"
+            className="rounded-md px-3 py-1.5 text-xs text-ink/50 transition-colors hover:text-ink/80"
+          >
+            대시보드
+          </Link>
+          <button
+            onClick={fetchPhotos}
+            className="rounded-lg border border-accent/30 bg-white px-4 py-1.5 text-xs font-semibold text-accent shadow-sm transition-colors hover:bg-accent/5"
+          >
+            새 사진 불러오기
+          </button>
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-[1800px] px-4 py-6">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-6">
-          <section className="flex-1">
-            <div className="rounded-xl border border-ink/10 bg-white/50 p-2 dark:border-ink-dark/10 dark:bg-black/20">
-              {loading && (
-                <div className="flex min-h-[50vh] items-center justify-center text-muted">불러오는 중…</div>
-              )}
-              {error && (
-                <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 text-muted">
-                  <p>{error}</p>
-                  <button
-                    onClick={fetchPhotos}
-                    className="rounded-lg bg-ink px-4 py-2 text-sm text-paper dark:bg-ink-dark dark:text-paper-dark"
-                  >
-                    다시 시도
-                  </button>
-                </div>
-              )}
-              {!loading && !error && currentPhoto && (
-                <div className="relative flex justify-center">
-                  <PoseOverlay
-                    imageSrc={currentPhoto.urls.full ?? currentPhoto.urls.regular}
-                    guideMode={guideMode}
-                    boxOpacity={boxOpacity}
-                    enable3DBox={true}
-                    boxRenderMode={boxRenderMode}
-                    ribcageScale={ribcageScale}
-                    ribHeightScale={ribHeightScale}
-                    waistScale={waistScale}
-                    waistHeightScale={waistHeightScale}
-                    pelvisScale={pelvisScale}
-                    pelvisHeightScale={pelvisHeightScale}
-                    boxThickness={boxThickness}
-                    upperArmThickness={upperArmThickness}
-                    lowerArmThickness={lowerArmThickness}
-                    thighThickness={thighThickness}
-                    calfThickness={calfThickness}
-                    onSelectedKeyChange={setSelectedBoxKey}
-                  />
-                  {photos.length > 0 && (
-                    <>
-                      <button
-                        onClick={() => {
-                          setCurrentIndex((i) => (i - 1 + photos.length) % photos.length);
-                          setGuideMode("none");
-                        }}
-                        className="absolute left-2 top-1/2 z-20 -translate-y-1/2 rounded-full border border-white/60 bg-black/45 px-3 py-4 text-sm font-semibold text-white backdrop-blur hover:bg-black/60"
-                      >
-                        이전
-                      </button>
-                      <button
-                        onClick={() => {
-                          setCurrentIndex((i) => (i + 1) % photos.length);
-                          setGuideMode("none");
-                        }}
-                        className="absolute right-2 top-1/2 z-20 -translate-y-1/2 rounded-full border border-white/60 bg-black/45 px-3 py-4 text-sm font-semibold text-white backdrop-blur hover:bg-black/60"
-                      >
-                        다음
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          </section>
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        {loading && (
+          <div className="flex h-full items-center justify-center">
+            <p className="text-sm text-ink/40">사진 불러오는 중…</p>
+          </div>
+        )}
 
-          <aside className="lg:w-80 lg:shrink-0">
-            <div className="sticky top-6 space-y-8 rounded-xl border border-ink/10 bg-white/50 p-7 dark:border-ink-dark/10 dark:bg-black/20">
-              <div className="border-t border-ink/10 pt-6 dark:border-ink-dark/10">
-                <p className="mb-3 text-xs font-medium text-muted">가이드 모드</p>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => setGuideMode("none")}
-                    className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${
-                      guideMode === "none"
-                        ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
-                        : "border border-ink/30 bg-transparent hover:bg-ink/5 dark:border-ink-dark/30"
-                    }`}
-                  >
-                    기본 사진
-                  </button>
-                  <button
-                    onClick={() => setGuideMode("skeleton")}
-                    className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${
-                      guideMode === "skeleton"
-                        ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
-                        : "border border-ink/30 bg-transparent hover:bg-ink/5 dark:border-ink-dark/30"
-                    }`}
-                  >
-                    1단계 스켈레톤
-                  </button>
-                  <button
-                    onClick={() => { setGuideMode("box"); if (boxRenderMode === "off") setBoxRenderMode("wire"); }}
-                    className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${
-                      guideMode === "box"
-                        ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
-                        : "border border-ink/30 bg-transparent hover:bg-ink/5 dark:border-ink-dark/30"
-                    }`}
-                  >
-                    2단계 몸통 도형화
-                  </button>
-                </div>
+        {error && (
+          <div className="flex h-full flex-col items-center justify-center gap-4">
+            <p className="text-sm text-ink/50">{error}</p>
+            <button
+              onClick={fetchPhotos}
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white shadow-sm shadow-accent/30 hover:opacity-90"
+            >
+              다시 시도
+            </button>
+          </div>
+        )}
 
-                {guideMode === "box" && (
-                  <div className="mt-4 space-y-3">
-                    <div>
-                      <p className="mb-1 block text-xs text-muted">3D 가이드 표시</p>
-                      <div className="grid grid-cols-3 gap-2">
-                        <button
-                          onClick={() => setBoxRenderMode("off")}
-                          className={`rounded-lg px-2 py-1.5 text-xs ${
-                            boxRenderMode === "off"
-                              ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
-                              : "border border-ink/30"
-                          }`}
-                        >
-                          가이드 끄기
-                        </button>
-                        <button
-                          onClick={() => setBoxRenderMode("wire")}
-                          className={`rounded-lg px-2 py-1.5 text-xs ${
-                            boxRenderMode === "wire"
-                              ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
-                              : "border border-ink/30"
-                          }`}
-                        >
-                          선
-                        </button>
-                        <button
-                          onClick={() => setBoxRenderMode("solid")}
-                          className={`rounded-lg px-2 py-1.5 text-xs ${
-                            boxRenderMode === "solid"
-                              ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
-                              : "border border-ink/30"
-                          }`}
-                        >
-                          면
-                        </button>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs text-muted">
-                        박스 투명도: {Math.round(boxOpacity * 100)}%
-                      </label>
-                      <input
-                        type="range"
-                        min="0.3"
-                        max="1"
-                        step="0.05"
-                        value={boxOpacity}
-                        onChange={(e) => setBoxOpacity(parseFloat(e.target.value))}
-                        className="w-full accent-ink dark:accent-ink-dark"
-                      />
-                    </div>
-                    {selectedBoxKey === "rib" && (
-                      <>
-                        <div>
-                          <label className="mb-1 block text-xs text-muted">
-                            가슴 박스 크기: {ribcageScale.toFixed(2)}x
-                          </label>
-                          <input
-                            type="range"
-                            min="0.7"
-                            max="1.5"
-                            step="0.05"
-                            value={ribcageScale}
-                            onChange={(e) => setRibcageScale(parseFloat(e.target.value))}
-                            className="w-full accent-blue-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs text-muted">
-                            가슴 박스 높이: {ribHeightScale.toFixed(2)}x
-                          </label>
-                          <input
-                            type="range"
-                            min="0.6"
-                            max="1.6"
-                            step="0.05"
-                            value={ribHeightScale}
-                            onChange={(e) => setRibHeightScale(parseFloat(e.target.value))}
-                            className="w-full accent-cyan-500"
-                          />
-                        </div>
-                      </>
-                    )}
-                    {selectedBoxKey === "waist" && (
-                      <>
-                        <div>
-                          <label className="mb-1 block text-xs text-muted">
-                            허리 박스 크기: {waistScale.toFixed(2)}x
-                          </label>
-                          <input
-                            type="range"
-                            min="0.7"
-                            max="1.5"
-                            step="0.05"
-                            value={waistScale}
-                            onChange={(e) => setWaistScale(parseFloat(e.target.value))}
-                            className="w-full accent-violet-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs text-muted">
-                            허리 박스 높이: {waistHeightScale.toFixed(2)}x
-                          </label>
-                          <input
-                            type="range"
-                            min="0.6"
-                            max="1.6"
-                            step="0.05"
-                            value={waistHeightScale}
-                            onChange={(e) => setWaistHeightScale(parseFloat(e.target.value))}
-                            className="w-full accent-purple-500"
-                          />
-                        </div>
-                      </>
-                    )}
-                    {selectedBoxKey === "pelvis" && (
-                      <>
-                        <div>
-                          <label className="mb-1 block text-xs text-muted">
-                            골반 박스 크기: {pelvisScale.toFixed(2)}x
-                          </label>
-                          <input
-                            type="range"
-                            min="0.7"
-                            max="1.5"
-                            step="0.05"
-                            value={pelvisScale}
-                            onChange={(e) => setPelvisScale(parseFloat(e.target.value))}
-                            className="w-full accent-yellow-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs text-muted">
-                            골반 박스 높이: {pelvisHeightScale.toFixed(2)}x
-                          </label>
-                          <input
-                            type="range"
-                            min="0.6"
-                            max="1.6"
-                            step="0.05"
-                            value={pelvisHeightScale}
-                            onChange={(e) => setPelvisHeightScale(parseFloat(e.target.value))}
-                            className="w-full accent-orange-500"
-                          />
-                        </div>
-                      </>
-                    )}
-                    <div>
-                      <label className="mb-1 block text-xs text-muted">
-                        박스 두께: {boxThickness.toFixed(2)}
-                      </label>
-                      <input
-                        type="range"
-                        min="0.15"
-                        max="0.8"
-                        step="0.05"
-                        value={boxThickness}
-                        onChange={(e) => setBoxThickness(parseFloat(e.target.value))}
-                        className="w-full accent-emerald-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs text-muted">
-                        상완 두께: {upperArmThickness.toFixed(2)}
-                      </label>
-                      <input
-                        type="range"
-                        min="0.5"
-                        max="1.4"
-                        step="0.05"
-                        value={upperArmThickness}
-                        onChange={(e) => setUpperArmThickness(parseFloat(e.target.value))}
-                        className="w-full accent-sky-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs text-muted">
-                        하완 두께: {lowerArmThickness.toFixed(2)}
-                      </label>
-                      <input
-                        type="range"
-                        min="0.5"
-                        max="1.4"
-                        step="0.05"
-                        value={lowerArmThickness}
-                        onChange={(e) => setLowerArmThickness(parseFloat(e.target.value))}
-                        className="w-full accent-blue-600"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs text-muted">
-                        허벅지 두께: {thighThickness.toFixed(2)}
-                      </label>
-                      <input
-                        type="range"
-                        min="0.5"
-                        max="1.4"
-                        step="0.05"
-                        value={thighThickness}
-                        onChange={(e) => setThighThickness(parseFloat(e.target.value))}
-                        className="w-full accent-amber-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs text-muted">
-                        종아리 두께: {calfThickness.toFixed(2)}
-                      </label>
-                      <input
-                        type="range"
-                        min="0.5"
-                        max="1.4"
-                        step="0.05"
-                        value={calfThickness}
-                        onChange={(e) => setCalfThickness(parseFloat(e.target.value))}
-                        className="w-full accent-orange-600"
-                      />
+        {!loading && !error && photos.length > 0 && (
+          <>
+            <p className="mb-4 text-xs text-ink/40">
+              사진을 클릭하면 도형화 연습을 시작합니다 · {photos.length}장
+            </p>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              {photos.map((photo) => (
+                <button
+                  key={photo.id}
+                  onClick={() => handleSelectPhoto(photo)}
+                  className="group relative overflow-hidden rounded-xl bg-ink/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  <div className="aspect-[3/4]">
+                    <img
+                      src={photo.urls.regular}
+                      alt={photo.alt_description ?? "pose photo"}
+                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    />
+                  </div>
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 backdrop-blur-[1px] transition-opacity duration-200 group-hover:opacity-100">
+                    <div className="rounded-full bg-white/90 px-4 py-1.5 text-xs font-semibold text-ink shadow">
+                      연습 시작
                     </div>
                   </div>
-                )}
-              </div>
-
-              {currentPhoto && <p className="text-xs text-muted">© {currentPhoto.user.name} / Unsplash</p>}
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-3 py-2">
+                    <p className="truncate text-[10px] text-white/70">© {photo.user.name}</p>
+                  </div>
+                </button>
+              ))}
             </div>
-          </aside>
-        </div>
+          </>
+        )}
       </div>
     </main>
   );
