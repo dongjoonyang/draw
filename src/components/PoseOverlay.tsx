@@ -180,6 +180,7 @@ export default function PoseOverlay({
   const [error, setError] = useState<string | null>(null);
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
   const [selectedKey, setSelectedKey] = useState<BoxKey | null>(null);
+  const gizmoModeSetterRef = useRef<((mode: GizmoMode) => void) | null>(null);
 
   const showGuide = guideMode === "skeleton" || guideMode === "box";
   const showSkeleton = guideMode === "skeleton";
@@ -714,6 +715,11 @@ export default function PoseOverlay({
       isDraggingRef,
     });
 
+    gizmoModeSetterRef.current = (mode: GizmoMode) => {
+      tc.setMode(mode);
+      setGizmoMode(mode);
+    };
+
     // ── 렌더 루프 ─────────────────────────────────────────────────────────
     // selectedKey는 gizmoStateRef 내부에서 관리되어 클로저로 접근
     const gizmoSelectedRef = { current: null as BoxKey | null };
@@ -734,6 +740,7 @@ export default function PoseOverlay({
     if (img) resizeObserver.observe(img);
 
     return () => {
+      gizmoModeSetterRef.current = null;
       if (rafRef.current !== null) {
         window.cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
@@ -796,18 +803,23 @@ export default function PoseOverlay({
 
       {/* 기즈모 모드 HUD */}
       {showThree && selectedKey && (
-        <div className="pointer-events-none absolute bottom-3 left-1/2 flex -translate-x-1/2 gap-2">
+        <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 gap-2">
           {(["translate", "rotate", "scale"] as GizmoMode[]).map((mode) => (
-            <span
+            <button
               key={mode}
-              className={`rounded px-2 py-0.5 text-xs font-mono ${
+              type="button"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                gizmoModeSetterRef.current?.(mode);
+              }}
+              className={`rounded px-3 py-1.5 text-xs font-mono select-none touch-manipulation ${
                 gizmoMode === mode
                   ? "bg-white/90 text-black"
                   : "bg-black/40 text-white/60"
               }`}
             >
               {GIZMO_MODE_LABEL[mode]}
-            </span>
+            </button>
           ))}
         </div>
       )}

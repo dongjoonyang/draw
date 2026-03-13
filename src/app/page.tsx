@@ -8,6 +8,22 @@ import { getTodayRecord } from "@/lib/storage";
 type GuideMode = "none" | "skeleton" | "box";
 type BoxRenderMode = "off" | "wire" | "solid";
 
+const BOX_DEFAULTS = {
+  boxOpacity: 1,
+  boxRenderMode: "wire" as BoxRenderMode,
+  ribcageScale: 1.15,
+  ribHeightScale: 1,
+  waistScale: 1.0,
+  waistHeightScale: 1,
+  pelvisScale: 1.25,
+  pelvisHeightScale: 1,
+  boxThickness: 0.8,
+  upperArmThickness: 1.4,
+  lowerArmThickness: 1.4,
+  thighThickness: 1.4,
+  calfThickness: 1.4,
+};
+
 type UnsplashPhoto = {
   id: string;
   urls: { regular: string; full?: string };
@@ -58,20 +74,20 @@ export default function Home() {
   const [selectedPhoto, setSelectedPhoto] = useState<UnsplashPhoto | null>(null);
   const [guideMode, setGuideMode] = useState<GuideMode>("none");
 
-  const [boxOpacity, setBoxOpacity] = useState(1);
-  const [boxRenderMode, setBoxRenderMode] = useState<BoxRenderMode>("wire");
+  const [boxOpacity, setBoxOpacity] = useState(BOX_DEFAULTS.boxOpacity);
+  const [boxRenderMode, setBoxRenderMode] = useState<BoxRenderMode>(BOX_DEFAULTS.boxRenderMode);
   const [selectedBoxKey, setSelectedBoxKey] = useState<BoxKey | null>(null);
-  const [ribcageScale, setRibcageScale] = useState(1.15);
-  const [ribHeightScale, setRibHeightScale] = useState(1);
-  const [waistScale, setWaistScale] = useState(1.0);
-  const [waistHeightScale, setWaistHeightScale] = useState(1);
-  const [pelvisScale, setPelvisScale] = useState(1.25);
-  const [pelvisHeightScale, setPelvisHeightScale] = useState(1);
-  const [boxThickness, setBoxThickness] = useState(0.8);
-  const [upperArmThickness, setUpperArmThickness] = useState(1.4);
-  const [lowerArmThickness, setLowerArmThickness] = useState(1.4);
-  const [thighThickness, setThighThickness] = useState(1.4);
-  const [calfThickness, setCalfThickness] = useState(1.4);
+  const [ribcageScale, setRibcageScale] = useState(BOX_DEFAULTS.ribcageScale);
+  const [ribHeightScale, setRibHeightScale] = useState(BOX_DEFAULTS.ribHeightScale);
+  const [waistScale, setWaistScale] = useState(BOX_DEFAULTS.waistScale);
+  const [waistHeightScale, setWaistHeightScale] = useState(BOX_DEFAULTS.waistHeightScale);
+  const [pelvisScale, setPelvisScale] = useState(BOX_DEFAULTS.pelvisScale);
+  const [pelvisHeightScale, setPelvisHeightScale] = useState(BOX_DEFAULTS.pelvisHeightScale);
+  const [boxThickness, setBoxThickness] = useState(BOX_DEFAULTS.boxThickness);
+  const [upperArmThickness, setUpperArmThickness] = useState(BOX_DEFAULTS.upperArmThickness);
+  const [lowerArmThickness, setLowerArmThickness] = useState(BOX_DEFAULTS.lowerArmThickness);
+  const [thighThickness, setThighThickness] = useState(BOX_DEFAULTS.thighThickness);
+  const [calfThickness, setCalfThickness] = useState(BOX_DEFAULTS.calfThickness);
 
   const fetchPhotos = useCallback(async () => {
     setLoading(true);
@@ -97,6 +113,22 @@ export default function Home() {
   useEffect(() => {
     if (guideMode !== "box") setSelectedBoxKey(null);
   }, [guideMode]);
+
+  const handleResetBox = () => {
+    setBoxOpacity(BOX_DEFAULTS.boxOpacity);
+    setBoxRenderMode(BOX_DEFAULTS.boxRenderMode);
+    setRibcageScale(BOX_DEFAULTS.ribcageScale);
+    setRibHeightScale(BOX_DEFAULTS.ribHeightScale);
+    setWaistScale(BOX_DEFAULTS.waistScale);
+    setWaistHeightScale(BOX_DEFAULTS.waistHeightScale);
+    setPelvisScale(BOX_DEFAULTS.pelvisScale);
+    setPelvisHeightScale(BOX_DEFAULTS.pelvisHeightScale);
+    setBoxThickness(BOX_DEFAULTS.boxThickness);
+    setUpperArmThickness(BOX_DEFAULTS.upperArmThickness);
+    setLowerArmThickness(BOX_DEFAULTS.lowerArmThickness);
+    setThighThickness(BOX_DEFAULTS.thighThickness);
+    setCalfThickness(BOX_DEFAULTS.calfThickness);
+  };
 
   const handleSelectPhoto = (photo: UnsplashPhoto) => {
     setSelectedPhoto(photo);
@@ -200,9 +232,17 @@ export default function Home() {
 
             {guideMode === "box" && (
               <div className="flex-1 overflow-y-auto p-5">
-                <p className="mb-4 text-[10px] font-semibold uppercase tracking-widest text-ink/30">
-                  도형 설정
-                </p>
+                <div className="mb-4 flex items-center justify-between">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-ink/30">
+                    도형 설정
+                  </p>
+                  <button
+                    onClick={handleResetBox}
+                    className="rounded-md border border-ink/10 px-2 py-1 text-[10px] font-medium text-ink/40 transition-colors hover:border-ink/20 hover:text-ink/70"
+                  >
+                    초기화
+                  </button>
+                </div>
 
                 <div className="mb-4">
                   <p className="mb-2 text-[11px] text-ink/50">3D 가이드</p>
