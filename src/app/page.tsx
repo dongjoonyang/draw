@@ -73,6 +73,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [selectedPhoto, setSelectedPhoto] = useState<UnsplashPhoto | null>(null);
   const [guideMode, setGuideMode] = useState<GuideMode>("none");
+  const [landmarksReady, setLandmarksReady] = useState(false);
 
   const [boxOpacity, setBoxOpacity] = useState(BOX_DEFAULTS.boxOpacity);
   const [boxRenderMode, setBoxRenderMode] = useState<BoxRenderMode>(BOX_DEFAULTS.boxRenderMode);
@@ -133,6 +134,7 @@ export default function Home() {
   const handleSelectPhoto = (photo: UnsplashPhoto) => {
     setSelectedPhoto(photo);
     setGuideMode("none");
+    setLandmarksReady(false);
   };
 
   const handleBack = () => {
@@ -165,22 +167,29 @@ export default function Home() {
 
           <div className="flex flex-1 justify-center">
             <div className="flex items-center gap-0.5 rounded-lg bg-ink/10 p-0.5">
-              {guideTabs.map(({ key, label }) => (
-                <button
-                  key={key}
-                  onClick={() => {
-                    setGuideMode(key);
-                    if (key === "box" && boxRenderMode === "off") setBoxRenderMode("wire");
-                  }}
-                  className={`rounded-md px-4 py-1.5 text-xs font-medium transition-all ${
-                    guideMode === key
-                      ? "bg-white text-accent shadow-sm"
-                      : "text-ink/60 hover:text-ink hover:bg-ink/[0.06]"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+              {guideTabs.map(({ key, label }) => {
+                const disabled = key === "box" && !landmarksReady;
+                return (
+                  <button
+                    key={key}
+                    disabled={disabled}
+                    onClick={() => {
+                      if (disabled) return;
+                      setGuideMode(key);
+                      if (key === "box" && boxRenderMode === "off") setBoxRenderMode("wire");
+                    }}
+                    className={`rounded-md px-4 py-1.5 text-xs font-medium transition-all ${
+                      guideMode === key
+                        ? "bg-white text-accent shadow-sm"
+                        : disabled
+                        ? "text-ink/25 cursor-not-allowed"
+                        : "text-ink/60 hover:text-ink hover:bg-ink/[0.06]"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -217,6 +226,7 @@ export default function Home() {
               thighThickness={thighThickness}
               calfThickness={calfThickness}
               onSelectedKeyChange={setSelectedBoxKey}
+              onLandmarks={(lm) => { if (lm) setLandmarksReady(true); }}
             />
           </section>
 
