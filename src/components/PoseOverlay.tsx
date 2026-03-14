@@ -65,7 +65,7 @@ function clamp01(value: number) {
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
-type TorsoKey = "head" | "rib" | "waist" | "pelvis";
+type TorsoKey = "head" | "neck" | "rib" | "waist" | "pelvis";
 type LimbKey =
   | "leftUpperArm"
   | "rightUpperArm"
@@ -88,7 +88,7 @@ type BoxVisual = {
 };
 
 type SceneBundle = {
-  torso: { head: BoxVisual; rib: BoxVisual; waist: BoxVisual; pelvis: BoxVisual };
+  torso: { head: BoxVisual; neck: BoxVisual; rib: BoxVisual; waist: BoxVisual; pelvis: BoxVisual };
   limbs: Record<LimbKey, BoxVisual>;
   joints: Record<string, THREE.Mesh>;
 };
@@ -109,7 +109,7 @@ type BaseTransform = {
 };
 
 const ALL_BOX_KEYS: BoxKey[] = [
-  "head", "rib", "waist", "pelvis",
+  "head", "neck", "rib", "waist", "pelvis",
   "leftUpperArm", "rightUpperArm",
   "leftLowerArm", "rightLowerArm",
   "leftThigh", "rightThigh",
@@ -129,6 +129,7 @@ function createManualMap(): Record<BoxKey, ManualTransform> {
 
 function getBoxVisualByKey(bundle: SceneBundle, key: BoxKey): BoxVisual | null {
   if (key === "head") return bundle.torso.head;
+  if (key === "neck") return bundle.torso.neck;
   if (key === "rib") return bundle.torso.rib;
   if (key === "waist") return bundle.torso.waist;
   if (key === "pelvis") return bundle.torso.pelvis;
@@ -404,6 +405,7 @@ export default function PoseOverlay({
 
     const torso = {
       head: createBox("head", { midline: true, shape: "box", faceColor: 0xfce7f3, edgeColor: 0xbe185d }),
+      neck: createBox("neck", { shape: "cylinder", faceColor: 0xfce7f3, edgeColor: 0xbe185d }),
       rib: createBox("rib", { midline: true, sideDiagonal: true, shape: "box", faceColor: 0xdbeafe, edgeColor: 0x1d4ed8 }),
       waist: createBox("waist", { midline: true, sideDiagonal: true, shape: "box", faceColor: 0xe9d5ff, edgeColor: 0x7e22ce }),
       pelvis: createBox("pelvis", { midline: true, sideDiagonal: true, shape: "box", faceColor: 0xfef3c7, edgeColor: 0xb45309 }),
@@ -444,7 +446,7 @@ export default function PoseOverlay({
     const getAllBoxes = (): BoxVisual[] => {
       const b = bundleRef.current;
       if (!b) return [];
-      return [b.torso.head, b.torso.rib, b.torso.waist, b.torso.pelvis, ...Object.values(b.limbs)];
+      return [b.torso.head, b.torso.neck, b.torso.rib, b.torso.waist, b.torso.pelvis, ...Object.values(b.limbs)];
     };
 
     // ── 렌더 모드 적용 ────────────────────────────────────────────────────
@@ -670,6 +672,38 @@ export default function PoseOverlay({
         applyTorsoBox(bundle.torso.head, headCenter, headQuat, headW, headH, headD);
       } else {
         bundle.torso.head.mesh.visible = false;
+      }
+
+      // ── 목 실린더 ──────────────────────────────────────────────────────
+      if (lEar && rEar && valid(lEar) && valid(rEar)) {
+        const pLE2 = toWorld2D(lEar), pRE2 = toWorld2D(rEar);
+        const pLE3 = toWorld3D(lEar), pRE3 = toWorld3D(rEar);
+        const earMid2 = pLE2.clone().add(pRE2).multiplyScalar(0.5);
+        const earMid3 = pLE3.clone().add(pRE3).multiplyScalar(0.5);
+
+        const neckTop2 = earMid2;
+        const neckBot2 = shoulderMid2.clone();
+        const neckTop3 = earMid3;
+        const neckBot3 = shoulderMid3.clone();
+        const neckLength = neckBot2.distanceTo(neckTop2);
+
+        if (neckLength > worldHeight * 0.01) {
+          const dir2 = neckTop2.clone().sub(neckBot2).normalize();
+          const dir3 = neckTop3.clone().sub(neckBot3).normalize();
+          const neckQ2 = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir2);
+          const zTilt = Math.atan2(dir3.z, Math.max(1e-6, Math.hypot(dir3.x, dir3.y)));
+          const neckQuat = neckQ2.clone().multiply(
+            new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -zTilt)
+          );
+          const neckCenter2 = neckBot2.clone().add(neckTop2).multiplyScalar(0.5);
+          const neckThick = Math.max(shoulderWidth * 0.2, worldWidth * 0.022);
+          bundle.torso.neck.mesh.visible = boxRenderMode !== "off";
+          applyTorsoBox(bundle.torso.neck, neckCenter2, neckQuat, neckThick, neckLength, neckThick);
+        } else {
+          bundle.torso.neck.mesh.visible = false;
+        }
+      } else {
+        bundle.torso.neck.mesh.visible = false;
       }
 
       // ── 팔다리 실린더 ─────────────────────────────────────────────────
