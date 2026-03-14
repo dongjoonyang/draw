@@ -821,6 +821,16 @@ export default function PoseOverlay({
               {GIZMO_MODE_LABEL[mode]}
             </button>
           ))}
+          <button
+            type="button"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              manualRef.current = createManualMap();
+            }}
+            className="rounded px-3 py-1.5 text-xs font-mono select-none touch-manipulation bg-orange-500/80 text-white"
+          >
+            초기화
+          </button>
         </div>
       )}
 
