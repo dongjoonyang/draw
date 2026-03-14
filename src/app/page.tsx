@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import PoseOverlay, { BoxKey } from "@/components/PoseOverlay";
 import { getTodayRecord } from "@/lib/storage";
 
@@ -74,6 +74,14 @@ export default function Home() {
   const [selectedPhoto, setSelectedPhoto] = useState<UnsplashPhoto | null>(null);
   const [guideMode, setGuideMode] = useState<GuideMode>("none");
   const [landmarksReady, setLandmarksReady] = useState(false);
+  const [practiceZoom, setPracticeZoom] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isSpaceHeld, setIsSpaceHeld] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const isSpaceRef = useRef(false);
+  const isPanningRef = useRef(false);
+  const panStartRef = useRef({ x: 0, y: 0 });
+  const panBaseRef = useRef({ x: 0, y: 0 });
 
   const [boxOpacity, setBoxOpacity] = useState(BOX_DEFAULTS.boxOpacity);
   const [boxRenderMode, setBoxRenderMode] = useState<BoxRenderMode>(BOX_DEFAULTS.boxRenderMode);
@@ -139,12 +147,47 @@ export default function Home() {
     setSelectedPhoto(photo);
     setGuideMode("none");
     setLandmarksReady(false);
+    setPracticeZoom(1);
+    setPanOffset({ x: 0, y: 0 });
   };
 
   const handleBack = () => {
     setSelectedPhoto(null);
     setGuideMode("none");
   };
+
+  useEffect(() => {
+    if (!selectedPhoto) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !e.repeat) {
+        e.preventDefault();
+        isSpaceRef.current = true;
+        setIsSpaceHeld(true);
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        isSpaceRef.current = false;
+        setIsSpaceHeld(false);
+        isPanningRef.current = false;
+        setIsPanning(false);
+      }
+    };
+    const onMouseUp = () => {
+      if (isPanningRef.current) {
+        isPanningRef.current = false;
+        setIsPanning(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [selectedPhoto]);
 
   const todayRecord = getTodayRecord();
 
@@ -223,8 +266,52 @@ export default function Home() {
           </section>
 
           {/* 오른쪽: 연습 사진 */}
-          <section className="relative flex flex-1 items-center justify-center overflow-hidden bg-ink/[0.03]">
+          <section
+            className="relative flex flex-1 items-center justify-center overflow-hidden bg-ink/[0.03]"
+            style={{ cursor: isPanning ? "grabbing" : isSpaceHeld ? "grab" : "default" }}
+            onWheel={(e) => {
+              e.preventDefault();
+              setPracticeZoom((prev) => Math.min(4, Math.max(0.3, prev - e.deltaY * 0.001)));
+            }}
+            onMouseDown={(e) => {
+              if (isSpaceRef.current) {
+                e.preventDefault();
+                isPanningRef.current = true;
+                setIsPanning(true);
+                panStartRef.current = { x: e.clientX, y: e.clientY };
+                panBaseRef.current = { ...panOffset };
+              }
+            }}
+            onMouseMove={(e) => {
+              if (isPanningRef.current) {
+                setPanOffset({
+                  x: panBaseRef.current.x + (e.clientX - panStartRef.current.x),
+                  y: panBaseRef.current.y + (e.clientY - panStartRef.current.y),
+                });
+              }
+            }}
+          >
             <div className="absolute left-2 top-2 z-10 rounded bg-black/30 px-2 py-0.5 text-[10px] text-white/70">연습</div>
+            <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
+              <button
+                onPointerDown={() => setPracticeZoom((p) => Math.min(4, +(p + 0.2).toFixed(2)))}
+                className="rounded bg-black/30 px-2 py-0.5 text-sm text-white/70 hover:bg-black/50"
+              >+</button>
+              <span className="rounded bg-black/20 px-1.5 py-0.5 text-[10px] text-white/60 tabular-nums">
+                {Math.round(practiceZoom * 100)}%
+              </span>
+              <button
+                onPointerDown={() => setPracticeZoom((p) => Math.max(0.3, +(p - 0.2).toFixed(2)))}
+                className="rounded bg-black/30 px-2 py-0.5 text-sm text-white/70 hover:bg-black/50"
+              >−</button>
+              {practiceZoom !== 1 && (
+                <button
+                  onPointerDown={() => setPracticeZoom(1)}
+                  className="rounded bg-black/30 px-2 py-0.5 text-[10px] text-white/70 hover:bg-black/50"
+                >↺</button>
+              )}
+            </div>
+            <div style={{ transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${practiceZoom})`, transformOrigin: "center center", transition: isPanning ? "none" : "transform 0.05s ease-out" }}>
             <PoseOverlay
               imageSrc={selectedPhoto.urls.full ?? selectedPhoto.urls.regular}
               guideMode={guideMode}
@@ -244,7 +331,9 @@ export default function Home() {
               calfThickness={calfThickness}
               onSelectedKeyChange={setSelectedBoxKey}
               onLandmarks={handleLandmarks}
+              zoom={practiceZoom}
             />
+            </div>
           </section>
 
           <aside className="flex w-72 shrink-0 flex-col overflow-hidden border-l border-ink/[0.06] bg-paper">

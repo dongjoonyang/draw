@@ -39,6 +39,8 @@ type Props = {
   onBoxUpdate?: (info: BoxUpdateInfo) => void;
   /** 선택된 박스 키 변경 시 부모에게 전달 */
   onSelectedKeyChange?: (key: BoxKey | null) => void;
+  /** CSS transform scale 값 (기본 1) */
+  zoom?: number;
 };
 
 // ── Pose landmark indices ────────────────────────────────────────────────────
@@ -161,6 +163,7 @@ export default function PoseOverlay({
   onLandmarks,
   onBoxUpdate,
   onSelectedKeyChange,
+  zoom = 1,
 }: Props) {
   const skeletonCanvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -175,6 +178,8 @@ export default function PoseOverlay({
   const bundleRef = useRef<SceneBundle | null>(null);
   const isDraggingRef = useRef(false);
   const rafRef = useRef<number | null>(null);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
   const manualRef = useRef<Record<BoxKey, ManualTransform>>(createManualMap());
   /** 매 프레임 updateMeshes가 기록하는 기저 변환 */
   const baseTransformsRef = useRef<Partial<Record<BoxKey, BaseTransform>>>({});
@@ -483,10 +488,14 @@ export default function PoseOverlay({
       const rect = img.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
 
-      container.style.width = `${rect.width}px`;
-      container.style.height = `${rect.height}px`;
-      rendererRef.current.setSize(rect.width, rect.height, false);
-      cameraRef.current.aspect = rect.width / rect.height;
+      const z = zoomRef.current;
+      const w = rect.width / z;
+      const h = rect.height / z;
+
+      container.style.width = `${w}px`;
+      container.style.height = `${h}px`;
+      rendererRef.current.setSize(w, h, false);
+      cameraRef.current.aspect = w / h;
 
       const worldHeight = 2;
       const fovRad = (cameraRef.current.fov * Math.PI) / 180;
@@ -513,8 +522,9 @@ export default function PoseOverlay({
       const rh = pts[RIGHT_HIP];
       if (!ls || !rs || !lh || !rh) return;
 
-      const rect = img.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
+      const rawRect = img.getBoundingClientRect();
+      if (rawRect.width <= 0 || rawRect.height <= 0) return;
+      const rect = { width: rawRect.width / zoomRef.current, height: rawRect.height / zoomRef.current };
 
       const aspect = rect.width / rect.height;
       const worldHeight = 2;
