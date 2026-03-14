@@ -78,6 +78,7 @@ export default function Home() {
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isSpaceHeld, setIsSpaceHeld] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
+  const [showHint, setShowHint] = useState(false);
   const isSpaceRef = useRef(false);
   const isPanningRef = useRef(false);
   const panStartRef = useRef({ x: 0, y: 0 });
@@ -149,6 +150,8 @@ export default function Home() {
     setLandmarksReady(false);
     setPracticeZoom(1);
     setPanOffset({ x: 0, y: 0 });
+    setShowHint(true);
+    setTimeout(() => setShowHint(false), 3000);
   };
 
   const handleBack = () => {
@@ -292,6 +295,13 @@ export default function Home() {
             }}
           >
             <div className="absolute left-2 top-2 z-10 rounded bg-black/30 px-2 py-0.5 text-[10px] text-white/70">연습</div>
+            <div
+              className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2 rounded-xl bg-black/60 px-4 py-2.5 text-center text-xs text-white/90 backdrop-blur-sm pointer-events-none"
+              style={{ transition: "opacity 0.8s ease", opacity: showHint ? 1 : 0 }}
+            >
+              <div className="mb-0.5 font-medium">캔버스 조작</div>
+              <div className="text-white/60">Space + 드래그 · 이동 &nbsp;·&nbsp; 휠 · 줌 인/아웃</div>
+            </div>
             <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
               <button
                 onPointerDown={() => setPracticeZoom((p) => Math.min(4, +(p + 0.2).toFixed(2)))}
