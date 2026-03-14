@@ -115,6 +115,10 @@ export default function Home() {
     if (guideMode !== "box") setSelectedBoxKey(null);
   }, [guideMode]);
 
+  const handleLandmarks = useCallback((lm: import("@/components/PoseOverlay").PoseLandmarks | null) => {
+    if (lm) setLandmarksReady(true);
+  }, []);
+
   const handleResetBox = () => {
     setBoxOpacity(BOX_DEFAULTS.boxOpacity);
     setBoxRenderMode(BOX_DEFAULTS.boxRenderMode);
@@ -207,7 +211,20 @@ export default function Home() {
         </header>
 
         <div className="flex flex-1 overflow-hidden">
+          {/* 왼쪽: 참고 사진 */}
+          <section className="relative flex flex-1 items-center justify-center overflow-hidden border-r border-ink/[0.06] bg-ink/[0.03]">
+            <img
+              src={selectedPhoto.urls.full ?? selectedPhoto.urls.regular}
+              alt="참고 사진"
+              className="max-h-full max-w-full object-contain"
+              style={{ filter: "contrast(1.05)" }}
+            />
+            <div className="absolute left-2 top-2 rounded bg-black/30 px-2 py-0.5 text-[10px] text-white/70">참고</div>
+          </section>
+
+          {/* 오른쪽: 연습 사진 */}
           <section className="relative flex flex-1 items-center justify-center overflow-hidden bg-ink/[0.03]">
+            <div className="absolute left-2 top-2 z-10 rounded bg-black/30 px-2 py-0.5 text-[10px] text-white/70">연습</div>
             <PoseOverlay
               imageSrc={selectedPhoto.urls.full ?? selectedPhoto.urls.regular}
               guideMode={guideMode}
@@ -226,7 +243,7 @@ export default function Home() {
               thighThickness={thighThickness}
               calfThickness={calfThickness}
               onSelectedKeyChange={setSelectedBoxKey}
-              onLandmarks={(lm) => { if (lm) setLandmarksReady(true); }}
+              onLandmarks={handleLandmarks}
             />
           </section>
 

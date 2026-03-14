@@ -184,7 +184,13 @@ export default function PoseOverlay({
   const [error, setError] = useState<string | null>(null);
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
   const [selectedKey, setSelectedKey] = useState<BoxKey | null>(null);
+  const [flashKey, setFlashKey] = useState<string | null>(null);
   const gizmoModeSetterRef = useRef<((mode: GizmoMode) => void) | null>(null);
+  const flashSetterRef = useRef<((key: string) => void) | null>(null);
+  flashSetterRef.current = (key: string) => {
+    setFlashKey(key);
+    setTimeout(() => setFlashKey(null), 150);
+  };
 
   const showGuide = guideMode === "skeleton" || guideMode === "box";
   const showSkeleton = guideMode === "skeleton";
@@ -750,6 +756,7 @@ export default function PoseOverlay({
       onSelectChange: setSelectedKey,
       onBoxUpdate,
       isDraggingRef,
+      flashRef: flashSetterRef,
     });
 
     gizmoModeSetterRef.current = (mode: GizmoMode) => {
@@ -849,7 +856,9 @@ export default function PoseOverlay({
                 e.stopPropagation();
                 gizmoModeSetterRef.current?.(mode);
               }}
-              className={`rounded px-3 py-1.5 text-xs font-mono select-none touch-manipulation ${
+              className={`rounded px-3 py-1.5 text-xs font-mono select-none touch-manipulation transition-transform duration-75 active:scale-90 ${
+                flashKey === mode ? "scale-90 opacity-60" : "scale-100"
+              } ${
                 gizmoMode === mode
                   ? "bg-white/90 text-black"
                   : "bg-black/40 text-white/60"
@@ -862,11 +871,15 @@ export default function PoseOverlay({
             type="button"
             onPointerDown={(e) => {
               e.stopPropagation();
-              manualRef.current = createManualMap();
+              for (const key of ALL_BOX_KEYS) {
+                manualRef.current[key].positionOffset.set(0, 0, 0);
+                manualRef.current[key].rotationOffset.set(0, 0, 0, 1);
+                manualRef.current[key].scaleVec.set(1, 1, 1);
+              }
             }}
-            className="rounded px-3 py-1.5 text-xs font-mono select-none touch-manipulation bg-orange-500/80 text-white"
+            className={`rounded px-3 py-1.5 text-xs font-mono select-none touch-manipulation bg-orange-500/80 text-white transition-transform duration-75 active:scale-90 ${flashKey === "q" ? "scale-90 opacity-60" : "scale-100"}`}
           >
-            초기화
+            초기화 (Q)
           </button>
         </div>
       )}
@@ -899,6 +912,7 @@ type GizmoControllerParams = {
   onSelectChange: (key: BoxKey | null) => void;
   onBoxUpdate?: (info: BoxUpdateInfo) => void;
   isDraggingRef: React.MutableRefObject<boolean>;
+  flashRef: React.MutableRefObject<((key: string) => void) | null>;
 };
 
 function setupGizmoController({
@@ -913,6 +927,7 @@ function setupGizmoController({
   onSelectChange,
   onBoxUpdate,
   isDraggingRef,
+  flashRef,
 }: GizmoControllerParams): { controls: TransformControls; destroy: () => void } {
   const tc = new TransformControls(camera, renderer.domElement);
   tc.setSize(0.8);
@@ -1017,14 +1032,25 @@ function setupGizmoController({
       case "t":
         tc.setMode("translate");
         onModeChange("translate");
+        flashRef.current?.("translate");
         break;
       case "r":
         tc.setMode("rotate");
         onModeChange("rotate");
+        flashRef.current?.("rotate");
         break;
       case "s":
         tc.setMode("scale");
         onModeChange("scale");
+        flashRef.current?.("scale");
+        break;
+      case "q":
+        flashRef.current?.("q");
+        for (const key of ALL_BOX_KEYS) {
+          manualRef.current[key].positionOffset.set(0, 0, 0);
+          manualRef.current[key].rotationOffset.set(0, 0, 0, 1);
+          manualRef.current[key].scaleVec.set(1, 1, 1);
+        }
         break;
       case "escape":
         selectedKey = null;
