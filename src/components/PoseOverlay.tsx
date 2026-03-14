@@ -42,6 +42,9 @@ type Props = {
 };
 
 // ── Pose landmark indices ────────────────────────────────────────────────────
+const NOSE = 0;
+const LEFT_EAR = 7;
+const RIGHT_EAR = 8;
 const LEFT_SHOULDER = 11;
 const RIGHT_SHOULDER = 12;
 const LEFT_ELBOW = 13;
@@ -60,7 +63,7 @@ function clamp01(value: number) {
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
-type TorsoKey = "rib" | "waist" | "pelvis";
+type TorsoKey = "head" | "rib" | "waist" | "pelvis";
 type LimbKey =
   | "leftUpperArm"
   | "rightUpperArm"
@@ -83,7 +86,7 @@ type BoxVisual = {
 };
 
 type SceneBundle = {
-  torso: { rib: BoxVisual; waist: BoxVisual; pelvis: BoxVisual };
+  torso: { head: BoxVisual; rib: BoxVisual; waist: BoxVisual; pelvis: BoxVisual };
   limbs: Record<LimbKey, BoxVisual>;
   joints: Record<string, THREE.Mesh>;
 };
@@ -104,7 +107,7 @@ type BaseTransform = {
 };
 
 const ALL_BOX_KEYS: BoxKey[] = [
-  "rib", "waist", "pelvis",
+  "head", "rib", "waist", "pelvis",
   "leftUpperArm", "rightUpperArm",
   "leftLowerArm", "rightLowerArm",
   "leftThigh", "rightThigh",
@@ -123,6 +126,7 @@ function createManualMap(): Record<BoxKey, ManualTransform> {
 }
 
 function getBoxVisualByKey(bundle: SceneBundle, key: BoxKey): BoxVisual | null {
+  if (key === "head") return bundle.torso.head;
   if (key === "rib") return bundle.torso.rib;
   if (key === "waist") return bundle.torso.waist;
   if (key === "pelvis") return bundle.torso.pelvis;
@@ -388,6 +392,7 @@ export default function PoseOverlay({
     };
 
     const torso = {
+      head: createBox("head", { midline: true, shape: "box", faceColor: 0xfce7f3, edgeColor: 0xbe185d }),
       rib: createBox("rib", { midline: true, sideDiagonal: true, shape: "box", faceColor: 0xdbeafe, edgeColor: 0x1d4ed8 }),
       waist: createBox("waist", { midline: true, sideDiagonal: true, shape: "box", faceColor: 0xe9d5ff, edgeColor: 0x7e22ce }),
       pelvis: createBox("pelvis", { midline: true, sideDiagonal: true, shape: "box", faceColor: 0xfef3c7, edgeColor: 0xb45309 }),
@@ -428,7 +433,7 @@ export default function PoseOverlay({
     const getAllBoxes = (): BoxVisual[] => {
       const b = bundleRef.current;
       if (!b) return [];
-      return [b.torso.rib, b.torso.waist, b.torso.pelvis, ...Object.values(b.limbs)];
+      return [b.torso.head, b.torso.rib, b.torso.waist, b.torso.pelvis, ...Object.values(b.limbs)];
     };
 
     // ── 렌더 모드 적용 ────────────────────────────────────────────────────
@@ -618,6 +623,38 @@ export default function PoseOverlay({
         Math.max(hipWidth * pelvisScale, worldWidth * 0.08),
         pelvisHeight, pelvisDepth
       );
+
+      // ── 머리 박스 ──────────────────────────────────────────────────────
+      const lEar = pts[LEFT_EAR];
+      const rEar = pts[RIGHT_EAR];
+      const nose = pts[NOSE];
+      if (lEar && rEar && nose && valid(lEar) && valid(rEar) && valid(nose)) {
+        const pLE2 = toWorld2D(lEar), pRE2 = toWorld2D(rEar);
+        const pLE3 = toWorld3D(lEar), pRE3 = toWorld3D(rEar);
+        const pNose3 = toWorld3D(nose);
+
+        const earMid2 = pLE2.clone().add(pRE2).multiplyScalar(0.5);
+        const earWidth = pLE2.distanceTo(pRE2);
+        const headW = Math.max(earWidth * 1.15, worldWidth * 0.06);
+        const headH = headW * 1.35;
+        const headD = headW * 0.95;
+
+        const headCenter = earMid2.clone().add(new THREE.Vector3(0, headH * 0.1, 0));
+
+        const earLateral3 = pRE3.clone().sub(pLE3).normalize();
+        const noseDir3 = pNose3.clone().sub(pLE3.clone().add(pRE3).multiplyScalar(0.5)).normalize();
+        const headUp3 = earLateral3.clone().cross(noseDir3).normalize();
+        let headForward3 = earLateral3.clone().cross(headUp3).normalize();
+        if (headForward3.lengthSq() < 1e-6) headForward3 = new THREE.Vector3(0, 0, 1);
+        const headQuat = new THREE.Quaternion().setFromRotationMatrix(
+          new THREE.Matrix4().makeBasis(earLateral3, headUp3, headForward3)
+        );
+
+        bundle.torso.head.mesh.visible = boxRenderMode !== "off";
+        applyTorsoBox(bundle.torso.head, headCenter, headQuat, headW, headH, headD);
+      } else {
+        bundle.torso.head.mesh.visible = false;
+      }
 
       // ── 팔다리 실린더 ─────────────────────────────────────────────────
       const limbBaseThickness =
