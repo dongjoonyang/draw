@@ -29,6 +29,8 @@ type Props = {
   waistHeightScale?: number;
   pelvisScale?: number;
   pelvisHeightScale?: number;
+  headScale?: number;
+  headHeightScale?: number;
   boxThickness?: number;
   upperArmThickness?: number;
   lowerArmThickness?: number;
@@ -65,7 +67,7 @@ function clamp01(value: number) {
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
-type TorsoKey = "head" | "neck" | "rib" | "waist" | "pelvis";
+type TorsoKey = "rib" | "waist" | "pelvis" | "head";
 type LimbKey =
   | "leftUpperArm"
   | "rightUpperArm"
@@ -88,7 +90,7 @@ type BoxVisual = {
 };
 
 type SceneBundle = {
-  torso: { head: BoxVisual; neck: BoxVisual; rib: BoxVisual; waist: BoxVisual; pelvis: BoxVisual };
+  torso: { rib: BoxVisual; waist: BoxVisual; pelvis: BoxVisual; head: BoxVisual };
   limbs: Record<LimbKey, BoxVisual>;
   joints: Record<string, THREE.Mesh>;
 };
@@ -109,7 +111,7 @@ type BaseTransform = {
 };
 
 const ALL_BOX_KEYS: BoxKey[] = [
-  "head", "neck", "rib", "waist", "pelvis",
+  "rib", "waist", "pelvis", "head",
   "leftUpperArm", "rightUpperArm",
   "leftLowerArm", "rightLowerArm",
   "leftThigh", "rightThigh",
@@ -128,11 +130,10 @@ function createManualMap(): Record<BoxKey, ManualTransform> {
 }
 
 function getBoxVisualByKey(bundle: SceneBundle, key: BoxKey): BoxVisual | null {
-  if (key === "head") return bundle.torso.head;
-  if (key === "neck") return bundle.torso.neck;
   if (key === "rib") return bundle.torso.rib;
   if (key === "waist") return bundle.torso.waist;
   if (key === "pelvis") return bundle.torso.pelvis;
+  if (key === "head") return bundle.torso.head;
   return (bundle.limbs as Record<string, BoxVisual>)[key] ?? null;
 }
 
@@ -156,6 +157,8 @@ export default function PoseOverlay({
   waistHeightScale = 1,
   pelvisScale = 1,
   pelvisHeightScale = 1,
+  headScale = 1,
+  headHeightScale = 1,
   boxThickness = 0.4,
   upperArmThickness = 0.9,
   lowerArmThickness = 0.78,
@@ -178,6 +181,11 @@ export default function PoseOverlay({
   const sceneRef = useRef<THREE.Scene | null>(null);
   const bundleRef = useRef<SceneBundle | null>(null);
   const isDraggingRef = useRef(false);
+  const hiddenKeysRef = useRef<Set<BoxKey>>(new Set());
+  const validLandmarkKeysRef = useRef<Set<BoxKey>>(new Set());
+  const currentSelectedKeyRef = useRef<BoxKey | null>(null);
+  const triggerDeleteRef = useRef<((key: BoxKey) => void) | null>(null);
+  const triggerResetHiddenRef = useRef<(() => void) | null>(null);
   const rafRef = useRef<number | null>(null);
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
@@ -297,32 +305,101 @@ export default function PoseOverlay({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const rect = img.getBoundingClientRect();
-    canvas.width = rect.width;
-    canvas.height = rect.height;
+    const w = img.offsetWidth;
+    const h = img.offsetHeight;
+    if (w <= 0 || h <= 0) return;
+    canvas.width = w;
+    canvas.height = h;
+    canvas.style.width = `${w}px`;
+    canvas.style.height = `${h}px`;
 
-    const toCanvas = (x: number, y: number) => ({ x: x * rect.width, y: y * rect.height });
+    const scale = Math.min(w, h) / 500;
+    const toCanvas = (x: number, y: number) => ({ x: x * w, y: y * h });
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const connections = poseConnectionsRef.current;
-    if (connections) {
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
-      ctx.lineWidth = 2;
-      for (const { start, end } of connections) {
-        const a = landmarks[start];
-        const b = landmarks[end];
-        if (!a || !b) continue;
-        if (a.x < 0 || a.x > 1 || a.y < 0 || a.y > 1) continue;
-        if (b.x < 0 || b.x > 1 || b.y < 0 || b.y > 1) continue;
-        const p1 = toCanvas(a.x, a.y);
-        const p2 = toCanvas(b.x, b.y);
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.stroke();
+    const isVisible = (pt: { x: number; y: number } | undefined) =>
+      pt && pt.x >= 0 && pt.x <= 1 && pt.y >= 0 && pt.y <= 1;
+
+    // 색상·굵기별 연결선 그룹
+    const GROUPS = [
+      // 몸통 (초록)
+      { color: "#69F0AE", width: 3.5, pairs: [[11,12],[11,23],[12,24],[23,24]] },
+      // 척추 중심선 (밝은 초록)
+      { color: "#B9F6CA", width: 2, pairs: [[11,12]] },
+      // 왼팔 (하늘색) — MediaPipe 왼쪽=화면 왼쪽
+      { color: "#40C4FF", width: 3, pairs: [[11,13],[13,15]] },
+      { color: "#80D8FF", width: 1.5, pairs: [[15,17],[15,19],[15,21],[17,19]] },
+      // 오른팔 (분홍)
+      { color: "#FF80AB", width: 3, pairs: [[12,14],[14,16]] },
+      { color: "#FFCCDD", width: 1.5, pairs: [[16,18],[16,20],[16,22],[18,20]] },
+      // 왼다리 (주황)
+      { color: "#FFD740", width: 3.5, pairs: [[23,25],[25,27]] },
+      { color: "#FFE57F", width: 1.5, pairs: [[27,29],[27,31],[29,31]] },
+      // 오른다리 (보라)
+      { color: "#EA80FC", width: 3.5, pairs: [[24,26],[26,28]] },
+      { color: "#F3B8FF", width: 1.5, pairs: [[28,30],[28,32],[30,32]] },
+      // 얼굴 (노란)
+      { color: "#FFD740", width: 1.2, pairs: [[0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],[9,10]] },
+    ];
+
+    // 관절 표시할 주요 랜드마크 인덱스
+    const JOINT_INDICES = [0, 7, 8, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+
+    const drawPass = (shadowMode: boolean) => {
+      for (const group of GROUPS) {
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        if (shadowMode) {
+          ctx.strokeStyle = "rgba(0,0,0,0.55)";
+          ctx.lineWidth = (group.width + 2) * scale;
+        } else {
+          ctx.strokeStyle = group.color;
+          ctx.lineWidth = group.width * scale;
+        }
+
+        for (const [si, ei] of group.pairs) {
+          const a = landmarks[si];
+          const b = landmarks[ei];
+          if (!isVisible(a) || !isVisible(b)) continue;
+          const p1 = toCanvas(a.x, a.y);
+          const p2 = toCanvas(b.x, b.y);
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+        }
       }
+    };
+
+    // 1패스: 그림자
+    ctx.save();
+    ctx.shadowBlur = 0;
+    ctx.translate(1.5 * scale, 1.5 * scale);
+    drawPass(true);
+    ctx.restore();
+
+    // 2패스: 컬러 선
+    drawPass(false);
+
+    // 3패스: 관절 원
+    for (const idx of JOINT_INDICES) {
+      const pt = landmarks[idx];
+      if (!isVisible(pt)) continue;
+      const p = toCanvas(pt.x, pt.y);
+      const r = 3.5 * scale;
+      // 외곽 검정
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r + 1.5 * scale, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      ctx.fill();
+      // 흰 원
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.fill();
     }
-  }, [landmarks, showSkeleton]);
+  }, [landmarks, showSkeleton, zoom]);
 
   // ── Three.js 씬 + TransformControls ─────────────────────────────────────
   useEffect(() => {
@@ -407,11 +484,10 @@ export default function PoseOverlay({
     };
 
     const torso = {
-      head: createBox("head", { midline: true, shape: "box", faceColor: 0xfce7f3, edgeColor: 0xbe185d }),
-      neck: createBox("neck", { shape: "cylinder", faceColor: 0xfce7f3, edgeColor: 0xbe185d }),
       rib: createBox("rib", { midline: true, sideDiagonal: true, shape: "box", faceColor: 0xdbeafe, edgeColor: 0x1d4ed8 }),
       waist: createBox("waist", { midline: true, sideDiagonal: true, shape: "box", faceColor: 0xe9d5ff, edgeColor: 0x7e22ce }),
       pelvis: createBox("pelvis", { midline: true, sideDiagonal: true, shape: "box", faceColor: 0xfef3c7, edgeColor: 0xb45309 }),
+      head: createBox("head", { midline: false, sideDiagonal: false, shape: "box", faceColor: 0xfce7f3, edgeColor: 0xbe185d }),
     };
 
     const limbs: Record<LimbKey, BoxVisual> = {
@@ -449,7 +525,7 @@ export default function PoseOverlay({
     const getAllBoxes = (): BoxVisual[] => {
       const b = bundleRef.current;
       if (!b) return [];
-      return [b.torso.head, b.torso.neck, b.torso.rib, b.torso.waist, b.torso.pelvis, ...Object.values(b.limbs)];
+      return [b.torso.rib, b.torso.waist, b.torso.pelvis, b.torso.head, ...Object.values(b.limbs)];
     };
 
     // ── 렌더 모드 적용 ────────────────────────────────────────────────────
@@ -458,7 +534,7 @@ export default function PoseOverlay({
       const wire = boxRenderMode === "wire";
 
       for (const box of getAllBoxes()) {
-        box.mesh.visible = !isOff;
+        box.mesh.visible = !isOff && !hiddenKeysRef.current.has(box.key) && validLandmarkKeysRef.current.has(box.key);
         const boxMat = box.mesh.material as THREE.MeshBasicMaterial;
         boxMat.opacity = wire ? Math.min(0.35, boxOpacity * 0.45) : Math.min(0.75, boxOpacity);
         boxMat.color.setHex(box.faceColor);
@@ -467,8 +543,9 @@ export default function PoseOverlay({
         const lineParts = [box.edges, box.midline, box.sideDiagonal].filter(Boolean) as Array<
           THREE.Line | THREE.LineSegments
         >;
+        const lineVisible = !isOff && !hiddenKeysRef.current.has(box.key) && validLandmarkKeysRef.current.has(box.key);
         for (const part of lineParts) {
-          part.visible = !isOff;
+          part.visible = lineVisible;
           const lineMat = part.material as THREE.LineBasicMaterial;
           lineMat.color.setHex(currentSelectedKey === box.key ? 0xff2d2d : box.edgeColor);
           lineMat.opacity = boxOpacity;
@@ -521,11 +598,13 @@ export default function PoseOverlay({
       const img = imageRef.current;
       if (!pts || !bundle || !img) return;
 
+      // 매 프레임 초기화 — 실제 랜드마크가 유효한 박스만 누적
+      validLandmarkKeysRef.current.clear();
+
       const ls = pts[LEFT_SHOULDER];
       const rs = pts[RIGHT_SHOULDER];
       const lh = pts[LEFT_HIP];
       const rh = pts[RIGHT_HIP];
-      if (!ls || !rs || !lh || !rh) return;
 
       const rawRect = img.getBoundingClientRect();
       if (rawRect.width <= 0 || rawRect.height <= 0) return;
@@ -546,6 +625,45 @@ export default function PoseOverlay({
           (0.5 - p.y) * worldHeight,
           -(p.z ?? 0) * depthScale
         );
+
+      // ── 머리 박스 (어깨+코만 있으면 표시) ────────────────────────────────
+      const nose = pts[NOSE];
+      if (ls && rs && valid(ls) && valid(rs) && nose && valid(nose)) {
+        const pLS2h = toWorld2D(ls), pRS2h = toWorld2D(rs);
+        const pLS3h = toWorld3D(ls), pRS3h = toWorld3D(rs);
+        const nosePos2 = toWorld2D(nose);
+        const shoulderWidthH = pLS2h.distanceTo(pRS2h);
+        const baseHeadW = Math.min(shoulderWidthH * 0.30, worldWidth * 0.14);
+        const headW = Math.max(baseHeadW * headScale, worldWidth * 0.05);
+        const baseHeadH = Math.min(shoulderWidthH * 0.38, worldHeight * 0.16);
+        const headH = Math.max(baseHeadH * headHeightScale, worldHeight * 0.06);
+        const headD = Math.min(shoulderWidthH * 0.28, worldWidth * 0.12);
+        const rawLateralH = pRS3h.clone().sub(pLS3h);
+        const headUpAxis = new THREE.Vector3(0, 1, 0);
+        let headForwardAxis = rawLateralH.clone().cross(headUpAxis).normalize();
+        if (headForwardAxis.lengthSq() < 1e-6) headForwardAxis = new THREE.Vector3(0, 0, 1);
+        const headLateralAxis = headUpAxis.clone().cross(headForwardAxis).normalize();
+        const headQuat = new THREE.Quaternion().setFromRotationMatrix(
+          new THREE.Matrix4().makeBasis(headLateralAxis, headUpAxis, headForwardAxis)
+        );
+        const headCenter = nosePos2.clone().add(new THREE.Vector3(0, headH * 0.1, 0));
+        bundle.torso.head.mesh.visible = boxRenderMode !== "off";
+        validLandmarkKeysRef.current.add("head");
+        const headManual = manualRef.current["head"];
+        baseTransformsRef.current["head"] = { position: headCenter.clone(), quaternion: headQuat.clone(), scale: new THREE.Vector3(headW, headH, headD) };
+        if (!(isDraggingRef.current && currentSelectedKey === "head")) {
+          bundle.torso.head.mesh.position.copy(headCenter).add(headManual.positionOffset);
+          bundle.torso.head.mesh.quaternion.copy(headQuat).multiply(headManual.rotationOffset);
+          bundle.torso.head.mesh.scale.set(headW * headManual.scaleVec.x, headH * headManual.scaleVec.y, headD * headManual.scaleVec.z);
+        }
+      } else {
+        bundle.torso.head.mesh.visible = false;
+      }
+
+      if (!ls || !rs || !lh || !rh) {
+        applyRenderMode(currentSelectedKey);
+        return;
+      }
 
       const pLS2 = toWorld2D(ls), pRS2 = toWorld2D(rs);
       const pLH2 = toWorld2D(lh), pRH2 = toWorld2D(rh);
@@ -589,6 +707,7 @@ export default function PoseOverlay({
         baseQuat: THREE.Quaternion,
         bx: number, by: number, bz: number
       ) => {
+        validLandmarkKeysRef.current.add(box.key);
         const manual = manualRef.current[box.key];
         baseTransformsRef.current[box.key] = {
           position: basePos.clone(),
@@ -645,70 +764,6 @@ export default function PoseOverlay({
         pelvisHeight, pelvisDepth
       );
 
-      // ── 머리 박스 ──────────────────────────────────────────────────────
-      const lEar = pts[LEFT_EAR];
-      const rEar = pts[RIGHT_EAR];
-      const nose = pts[NOSE];
-      if (lEar && rEar && nose && valid(lEar) && valid(rEar) && valid(nose)) {
-        const pLE2 = toWorld2D(lEar), pRE2 = toWorld2D(rEar);
-        const pLE3 = toWorld3D(lEar), pRE3 = toWorld3D(rEar);
-        const pNose3 = toWorld3D(nose);
-
-        const earMid2 = pLE2.clone().add(pRE2).multiplyScalar(0.5);
-        const earWidth = pLE2.distanceTo(pRE2);
-        const headW = Math.max(earWidth * 1.15, worldWidth * 0.06);
-        const headH = headW * 1.35;
-        const headD = headW * 0.95;
-
-        const headCenter = earMid2.clone().add(new THREE.Vector3(0, headH * 0.1, 0));
-
-        const earLateral3 = pRE3.clone().sub(pLE3).normalize();
-        const noseDir3 = pNose3.clone().sub(pLE3.clone().add(pRE3).multiplyScalar(0.5)).normalize();
-        const headUp3 = earLateral3.clone().cross(noseDir3).normalize();
-        let headForward3 = earLateral3.clone().cross(headUp3).normalize();
-        if (headForward3.lengthSq() < 1e-6) headForward3 = new THREE.Vector3(0, 0, 1);
-        const headQuat = new THREE.Quaternion().setFromRotationMatrix(
-          new THREE.Matrix4().makeBasis(earLateral3, headUp3, headForward3)
-        );
-
-        bundle.torso.head.mesh.visible = boxRenderMode !== "off";
-        applyTorsoBox(bundle.torso.head, headCenter, headQuat, headW, headH, headD);
-      } else {
-        bundle.torso.head.mesh.visible = false;
-      }
-
-      // ── 목 실린더 ──────────────────────────────────────────────────────
-      if (lEar && rEar && valid(lEar) && valid(rEar)) {
-        const pLE2 = toWorld2D(lEar), pRE2 = toWorld2D(rEar);
-        const pLE3 = toWorld3D(lEar), pRE3 = toWorld3D(rEar);
-        const earMid2 = pLE2.clone().add(pRE2).multiplyScalar(0.5);
-        const earMid3 = pLE3.clone().add(pRE3).multiplyScalar(0.5);
-
-        const neckTop2 = earMid2;
-        const neckBot2 = shoulderMid2.clone();
-        const neckTop3 = earMid3;
-        const neckBot3 = shoulderMid3.clone();
-        const neckLength = neckBot2.distanceTo(neckTop2);
-
-        if (neckLength > worldHeight * 0.01) {
-          const dir2 = neckTop2.clone().sub(neckBot2).normalize();
-          const dir3 = neckTop3.clone().sub(neckBot3).normalize();
-          const neckQ2 = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir2);
-          const zTilt = Math.atan2(dir3.z, Math.max(1e-6, Math.hypot(dir3.x, dir3.y)));
-          const neckQuat = neckQ2.clone().multiply(
-            new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -zTilt)
-          );
-          const neckCenter2 = neckBot2.clone().add(neckTop2).multiplyScalar(0.5);
-          const neckThick = Math.max(shoulderWidth * 0.2, worldWidth * 0.022);
-          bundle.torso.neck.mesh.visible = boxRenderMode !== "off";
-          applyTorsoBox(bundle.torso.neck, neckCenter2, neckQuat, neckThick, neckLength, neckThick);
-        } else {
-          bundle.torso.neck.mesh.visible = false;
-        }
-      } else {
-        bundle.torso.neck.mesh.visible = false;
-      }
-
       // ── 팔다리 실린더 ─────────────────────────────────────────────────
       const limbBaseThickness =
         Math.max(((shoulderWidth + hipWidth) / 2) * boxThickness * 0.5, worldWidth * 0.015);
@@ -750,6 +805,7 @@ export default function PoseOverlay({
           scale: new THREE.Vector3(thick, length, thick),
         };
         box.mesh.visible = boxRenderMode !== "off";
+        validLandmarkKeysRef.current.add(box.key);
 
         if (isDraggingRef.current && currentSelectedKey === box.key) {
           return;
@@ -800,10 +856,12 @@ export default function PoseOverlay({
       baseTransformsRef,
       bundleRef,
       onModeChange: setGizmoMode,
-      onSelectChange: setSelectedKey,
+      onSelectChange: (key) => { currentSelectedKeyRef.current = key; setSelectedKey(key); },
       onBoxUpdate,
       isDraggingRef,
       flashRef: flashSetterRef,
+      hiddenKeysRef,
+      currentSelectedKeyRef,
     });
 
     gizmoModeSetterRef.current = (mode: GizmoMode) => {
@@ -817,6 +875,23 @@ export default function PoseOverlay({
     // patch: gizmoController가 gizmoSelectedRef를 공유
     (tc as unknown as { _poseOverlaySelectedRef: typeof gizmoSelectedRef })
       ._poseOverlaySelectedRef = gizmoSelectedRef;
+
+    triggerDeleteRef.current = (key: BoxKey) => {
+      hiddenKeysRef.current.add(key);
+      const bundle = bundleRef.current;
+      if (bundle) {
+        const box = getBoxVisualByKey(bundle, key);
+        if (box) box.mesh.visible = false;
+      }
+      gizmoSelectedRef.current = null;
+      currentSelectedKeyRef.current = null;
+      tc.detach();
+      setSelectedKey(null);
+    };
+
+    triggerResetHiddenRef.current = () => {
+      hiddenKeysRef.current.clear();
+    };
 
     const tick = () => {
       updateSize();
@@ -855,6 +930,8 @@ export default function PoseOverlay({
     waistHeightScale,
     pelvisScale,
     pelvisHeightScale,
+    headScale,
+    headHeightScale,
     boxThickness,
     upperArmThickness,
     lowerArmThickness,
@@ -918,6 +995,17 @@ export default function PoseOverlay({
             type="button"
             onPointerDown={(e) => {
               e.stopPropagation();
+              if (selectedKey) triggerDeleteRef.current?.(selectedKey);
+            }}
+            className="rounded px-3 py-1.5 text-xs font-mono select-none touch-manipulation bg-red-500/80 text-white transition-transform duration-75 active:scale-90"
+          >
+            ⌫ 삭제
+          </button>
+          <button
+            type="button"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              triggerResetHiddenRef.current?.();
               for (const key of ALL_BOX_KEYS) {
                 manualRef.current[key].positionOffset.set(0, 0, 0);
                 manualRef.current[key].rotationOffset.set(0, 0, 0, 1);
@@ -969,6 +1057,8 @@ type GizmoControllerParams = {
   onBoxUpdate?: (info: BoxUpdateInfo) => void;
   isDraggingRef: React.MutableRefObject<boolean>;
   flashRef: React.MutableRefObject<((key: string) => void) | null>;
+  hiddenKeysRef: React.MutableRefObject<Set<BoxKey>>;
+  currentSelectedKeyRef: React.MutableRefObject<BoxKey | null>;
 };
 
 function setupGizmoController({
@@ -984,6 +1074,8 @@ function setupGizmoController({
   onBoxUpdate,
   isDraggingRef,
   flashRef,
+  hiddenKeysRef,
+  currentSelectedKeyRef,
 }: GizmoControllerParams): { controls: TransformControls; destroy: () => void } {
   const tc = new TransformControls(camera, renderer.domElement);
   tc.setSize(0.8);
@@ -1102,12 +1194,31 @@ function setupGizmoController({
         break;
       case "q":
         flashRef.current?.("q");
+        hiddenKeysRef.current.clear();
         for (const key of ALL_BOX_KEYS) {
           manualRef.current[key].positionOffset.set(0, 0, 0);
           manualRef.current[key].rotationOffset.set(0, 0, 0, 1);
           manualRef.current[key].scaleVec.set(1, 1, 1);
         }
         break;
+      case "backspace": {
+        const delKey = currentSelectedKeyRef.current ?? selectedKey;
+        if (delKey) {
+          hiddenKeysRef.current.add(delKey);
+          const bundle = bundleRef.current;
+          if (bundle) {
+            const box = getBoxVisualByKey(bundle, delKey);
+            if (box) box.mesh.visible = false;
+          }
+          const tcAnyDel = tc as unknown as { _poseOverlaySelectedRef?: { current: BoxKey | null } };
+          if (tcAnyDel._poseOverlaySelectedRef) tcAnyDel._poseOverlaySelectedRef.current = null;
+          selectedKey = null;
+          currentSelectedKeyRef.current = null;
+          tc.detach();
+          onSelectChange(null);
+        }
+        break;
+      }
       case "escape":
         selectedKey = null;
         const tcAny = tc as unknown as { _poseOverlaySelectedRef?: { current: BoxKey | null } };

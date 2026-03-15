@@ -17,6 +17,8 @@ const BOX_DEFAULTS = {
   waistHeightScale: 1,
   pelvisScale: 1.25,
   pelvisHeightScale: 1,
+  headScale: 1.0,
+  headHeightScale: 1.0,
   boxThickness: 0.8,
   upperArmThickness: 1.4,
   lowerArmThickness: 1.4,
@@ -102,6 +104,8 @@ export default function Home() {
   const [waistHeightScale, setWaistHeightScale] = useState(BOX_DEFAULTS.waistHeightScale);
   const [pelvisScale, setPelvisScale] = useState(BOX_DEFAULTS.pelvisScale);
   const [pelvisHeightScale, setPelvisHeightScale] = useState(BOX_DEFAULTS.pelvisHeightScale);
+  const [headScale, setHeadScale] = useState(BOX_DEFAULTS.headScale);
+  const [headHeightScale, setHeadHeightScale] = useState(BOX_DEFAULTS.headHeightScale);
   const [boxThickness, setBoxThickness] = useState(BOX_DEFAULTS.boxThickness);
   const [upperArmThickness, setUpperArmThickness] = useState(BOX_DEFAULTS.upperArmThickness);
   const [lowerArmThickness, setLowerArmThickness] = useState(BOX_DEFAULTS.lowerArmThickness);
@@ -198,6 +202,8 @@ export default function Home() {
     setWaistHeightScale(BOX_DEFAULTS.waistHeightScale);
     setPelvisScale(BOX_DEFAULTS.pelvisScale);
     setPelvisHeightScale(BOX_DEFAULTS.pelvisHeightScale);
+    setHeadScale(BOX_DEFAULTS.headScale);
+    setHeadHeightScale(BOX_DEFAULTS.headHeightScale);
     setBoxThickness(BOX_DEFAULTS.boxThickness);
     setUpperArmThickness(BOX_DEFAULTS.upperArmThickness);
     setLowerArmThickness(BOX_DEFAULTS.lowerArmThickness);
@@ -431,6 +437,8 @@ export default function Home() {
               waistHeightScale={waistHeightScale}
               pelvisScale={pelvisScale}
               pelvisHeightScale={pelvisHeightScale}
+              headScale={headScale}
+              headHeightScale={headHeightScale}
               boxThickness={boxThickness}
               upperArmThickness={upperArmThickness}
               lowerArmThickness={lowerArmThickness}
@@ -494,6 +502,13 @@ export default function Home() {
 
                 <SliderRow label="박스 투명도" value={boxOpacity} min={0.3} max={1} accent="accent-violet-500" onChange={setBoxOpacity} />
 
+                {selectedBoxKey === "head" && (
+                  <>
+                    <div className="my-3 text-[10px] font-semibold uppercase tracking-widest text-pink-500/70">머리</div>
+                    <SliderRow label="크기" value={headScale} min={0.5} max={2.0} accent="accent-pink-500" onChange={setHeadScale} />
+                    <SliderRow label="높이" value={headHeightScale} min={0.5} max={2.0} accent="accent-rose-500" onChange={setHeadHeightScale} />
+                  </>
+                )}
                 {selectedBoxKey === "rib" && (
                   <>
                     <div className="my-3 text-[10px] font-semibold uppercase tracking-widest text-violet-500/70">가슴</div>
