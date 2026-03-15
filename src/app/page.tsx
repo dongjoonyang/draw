@@ -188,6 +188,7 @@ export default function Home() {
   };
 
   const handleSelectPhoto = (photo: UnsplashPhoto) => {
+    history.pushState({ photo }, "");
     setSelectedPhoto(photo);
     setGuideMode("none");
     setLandmarksReady(false);
@@ -201,6 +202,23 @@ export default function Home() {
     setSelectedPhoto(null);
     setGuideMode("none");
   };
+
+  useEffect(() => {
+    const onPopState = (e: PopStateEvent) => {
+      if (e.state?.photo) {
+        setSelectedPhoto(e.state.photo);
+        setGuideMode("none");
+        setLandmarksReady(false);
+        setPracticeZoom(1);
+        setPanOffset({ x: 0, y: 0 });
+      } else {
+        setSelectedPhoto(null);
+        setGuideMode("none");
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   useEffect(() => {
     if (!selectedPhoto) return;
