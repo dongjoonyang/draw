@@ -23,66 +23,12 @@ const BOX_KEY_LABEL: Record<string, string> = {
   rightCalf: "오른쪽 종아리",
 };
 
-const BOX_DEFAULTS = {
-  boxOpacity: 1,
-  boxRenderMode: "wire" as BoxRenderMode,
-  ribcageScale: 1.15,
-  ribHeightScale: 1,
-  waistScale: 1.0,
-  waistHeightScale: 1,
-  pelvisScale: 1.25,
-  pelvisHeightScale: 1,
-  headScale: 1.0,
-  headHeightScale: 1.0,
-  boxThickness: 0.8,
-  upperArmThickness: 1.4,
-  lowerArmThickness: 1.4,
-  thighThickness: 1.4,
-  calfThickness: 1.4,
-};
-
 type UnsplashPhoto = {
   id: string;
   urls: { regular: string; full?: string };
   user: { name: string; username: string };
   alt_description?: string;
 };
-
-function SliderRow({
-  label,
-  value,
-  min,
-  max,
-  step = 0.05,
-  accent = "accent-violet-500",
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  accent?: string;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <div className="mb-3">
-      <label className="mb-1.5 flex justify-between text-[11px] text-ink/50">
-        <span>{label}</span>
-        <span className="tabular-nums">{value.toFixed(2)}</span>
-      </label>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className={`w-full ${accent}`}
-      />
-    </div>
-  );
-}
 
 export default function Home() {
   const [photos, setPhotos] = useState<UnsplashPhoto[]>([]);
@@ -119,22 +65,9 @@ export default function Home() {
     setActiveButtons((prev) => { const n = new Set(prev); n.add(key); return n; });
     setTimeout(() => setActiveButtons((prev) => { const n = new Set(prev); n.delete(key); return n; }), 200);
   }, []);
-  const [boxOpacity, setBoxOpacity] = useState(BOX_DEFAULTS.boxOpacity);
-  const [boxRenderMode, setBoxRenderMode] = useState<BoxRenderMode>(BOX_DEFAULTS.boxRenderMode);
+
+  const [boxRenderMode, setBoxRenderMode] = useState<BoxRenderMode>("wire");
   const [selectedBoxKey, setSelectedBoxKey] = useState<BoxKey | null>(null);
-  const [ribcageScale, setRibcageScale] = useState(BOX_DEFAULTS.ribcageScale);
-  const [ribHeightScale, setRibHeightScale] = useState(BOX_DEFAULTS.ribHeightScale);
-  const [waistScale, setWaistScale] = useState(BOX_DEFAULTS.waistScale);
-  const [waistHeightScale, setWaistHeightScale] = useState(BOX_DEFAULTS.waistHeightScale);
-  const [pelvisScale, setPelvisScale] = useState(BOX_DEFAULTS.pelvisScale);
-  const [pelvisHeightScale, setPelvisHeightScale] = useState(BOX_DEFAULTS.pelvisHeightScale);
-  const [headScale, setHeadScale] = useState(BOX_DEFAULTS.headScale);
-  const [headHeightScale, setHeadHeightScale] = useState(BOX_DEFAULTS.headHeightScale);
-  const [boxThickness, setBoxThickness] = useState(BOX_DEFAULTS.boxThickness);
-  const [upperArmThickness, setUpperArmThickness] = useState(BOX_DEFAULTS.upperArmThickness);
-  const [lowerArmThickness, setLowerArmThickness] = useState(BOX_DEFAULTS.lowerArmThickness);
-  const [thighThickness, setThighThickness] = useState(BOX_DEFAULTS.thighThickness);
-  const [calfThickness, setCalfThickness] = useState(BOX_DEFAULTS.calfThickness);
 
   const fetchPhotos = useCallback(async (pageNum: number) => {
     if (fetchingRef.current) return;
@@ -223,76 +156,9 @@ export default function Home() {
     }
   }, []);
 
-  const handleBoxUpdate = useCallback((info: BoxUpdateInfo) => {
-    const { key, scaleVec } = info;
-    const sx = scaleVec.x, sy = scaleVec.y;
-    const hasScale = Math.abs(sx - 1) > 0.001 || Math.abs(sy - 1) > 0.001;
-    if (!hasScale) return;
-
-    // absorbScale atomically updates the internal refs AND resets scaleVec to 1
-    // so the next RAF frame uses newBase × 1 = correct visual
-    poseOverlayRef.current?.absorbScale(key, sx, sy);
-
-    // Update React state for UI slider display (async, for display only)
-    const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-    switch (key) {
-      case "rib":
-        setRibcageScale((p) => clamp(p * sx, 0.7, 1.5));
-        setRibHeightScale((p) => clamp(p * sy, 0.6, 1.6));
-        break;
-      case "waist":
-        setWaistScale((p) => clamp(p * sx, 0.7, 1.5));
-        setWaistHeightScale((p) => clamp(p * sy, 0.6, 1.6));
-        break;
-      case "pelvis":
-        setPelvisScale((p) => clamp(p * sx, 0.7, 1.5));
-        setPelvisHeightScale((p) => clamp(p * sy, 0.6, 1.6));
-        break;
-      case "head":
-        setHeadScale((p) => clamp(p * sx, 0.5, 2.0));
-        setHeadHeightScale((p) => clamp(p * sy, 0.5, 2.0));
-        break;
-      case "leftUpperArm":
-      case "rightUpperArm":
-        setUpperArmThickness((p) => clamp(p * sx, 0.5, 1.4));
-        break;
-      case "leftLowerArm":
-      case "rightLowerArm":
-        setLowerArmThickness((p) => clamp(p * sx, 0.5, 1.4));
-        break;
-      case "leftThigh":
-      case "rightThigh":
-        setThighThickness((p) => clamp(p * sx, 0.5, 1.4));
-        break;
-      case "leftCalf":
-      case "rightCalf":
-        setCalfThickness((p) => clamp(p * sx, 0.5, 1.4));
-        break;
-    }
-    setLiveBoxInfo(null);
-  }, []);
-
   const handleBoxChange = useCallback((info: BoxUpdateInfo) => {
     setLiveBoxInfo(info);
   }, []);
-
-  const handleResetBox = () => {
-    setBoxOpacity(BOX_DEFAULTS.boxOpacity);
-    setBoxRenderMode(BOX_DEFAULTS.boxRenderMode);
-    setRibcageScale(BOX_DEFAULTS.ribcageScale);
-    setRibHeightScale(BOX_DEFAULTS.ribHeightScale);
-    setWaistScale(BOX_DEFAULTS.waistScale);
-    setWaistHeightScale(BOX_DEFAULTS.waistHeightScale);
-    setPelvisScale(BOX_DEFAULTS.pelvisScale);
-    setPelvisHeightScale(BOX_DEFAULTS.pelvisHeightScale);
-    setHeadScale(BOX_DEFAULTS.headScale);
-    setHeadHeightScale(BOX_DEFAULTS.headHeightScale);
-    setBoxThickness(BOX_DEFAULTS.boxThickness);
-    setUpperArmThickness(BOX_DEFAULTS.upperArmThickness);
-    setLowerArmThickness(BOX_DEFAULTS.lowerArmThickness);
-    setThighThickness(BOX_DEFAULTS.thighThickness);
-    setCalfThickness(BOX_DEFAULTS.calfThickness);
-  };
 
   const handleSelectPhoto = (photo: UnsplashPhoto) => {
     savedScrollRef.current = scrollContainerRef.current?.scrollTop ?? 0;
@@ -568,23 +434,8 @@ export default function Home() {
               ref={poseOverlayRef}
               imageSrc={selectedPhoto.urls.full ?? selectedPhoto.urls.regular}
               guideMode={guideMode}
-              boxOpacity={boxOpacity}
               enable3DBox={true}
               boxRenderMode={boxRenderMode}
-              ribcageScale={ribcageScale}
-              ribHeightScale={ribHeightScale}
-              waistScale={waistScale}
-              waistHeightScale={waistHeightScale}
-              pelvisScale={pelvisScale}
-              pelvisHeightScale={pelvisHeightScale}
-              headScale={headScale}
-              headHeightScale={headHeightScale}
-              boxThickness={boxThickness}
-              upperArmThickness={upperArmThickness}
-              lowerArmThickness={lowerArmThickness}
-              thighThickness={thighThickness}
-              calfThickness={calfThickness}
-              onBoxUpdate={handleBoxUpdate}
               onBoxChange={handleBoxChange}
               onSelectedKeyChange={(key) => { setSelectedBoxKey(key); if (!key) setLiveBoxInfo(null); }}
               onGizmoModeChange={setGizmoMode}
@@ -618,12 +469,6 @@ export default function Home() {
                       </p>
                     )}
                   </div>
-                  <button
-                    onClick={handleResetBox}
-                    className="rounded-md border border-ink/10 px-2 py-1 text-[10px] font-medium text-ink/40 transition-colors hover:border-ink/20 hover:text-ink/70"
-                  >
-                    초기화
-                  </button>
                 </div>
 
                 <div className="mb-4">
@@ -650,8 +495,6 @@ export default function Home() {
                     ))}
                   </div>
                 </div>
-
-                <SliderRow label="박스 투명도" value={boxOpacity} min={0.3} max={1} accent="accent-violet-500" onChange={setBoxOpacity} />
 
                 {/* 실시간 변환 수치 — rotate/scale 모드에서 박스 선택 시 즉시 표시 */}
                 {selectedBoxKey && gizmoMode !== "translate" && (
@@ -696,42 +539,6 @@ export default function Home() {
                     )}
                   </div>
                 )}
-
-                {selectedBoxKey === "head" && (
-                  <>
-                    <div className="my-3 text-[10px] font-semibold uppercase tracking-widest text-pink-500/70">머리</div>
-                    <SliderRow label="크기" value={headScale} min={0.5} max={2.0} accent="accent-pink-500" onChange={setHeadScale} />
-                    <SliderRow label="높이" value={headHeightScale} min={0.5} max={2.0} accent="accent-rose-500" onChange={setHeadHeightScale} />
-                  </>
-                )}
-                {selectedBoxKey === "rib" && (
-                  <>
-                    <div className="my-3 text-[10px] font-semibold uppercase tracking-widest text-violet-500/70">가슴</div>
-                    <SliderRow label="크기" value={ribcageScale} min={0.7} max={1.5} accent="accent-indigo-500" onChange={setRibcageScale} />
-                    <SliderRow label="높이" value={ribHeightScale} min={0.6} max={1.6} accent="accent-cyan-500" onChange={setRibHeightScale} />
-                  </>
-                )}
-                {selectedBoxKey === "waist" && (
-                  <>
-                    <div className="my-3 text-[10px] font-semibold uppercase tracking-widest text-violet-500/70">허리</div>
-                    <SliderRow label="크기" value={waistScale} min={0.7} max={1.5} accent="accent-purple-500" onChange={setWaistScale} />
-                    <SliderRow label="높이" value={waistHeightScale} min={0.6} max={1.6} accent="accent-fuchsia-500" onChange={setWaistHeightScale} />
-                  </>
-                )}
-                {selectedBoxKey === "pelvis" && (
-                  <>
-                    <div className="my-3 text-[10px] font-semibold uppercase tracking-widest text-violet-500/70">골반</div>
-                    <SliderRow label="크기" value={pelvisScale} min={0.7} max={1.5} accent="accent-yellow-500" onChange={setPelvisScale} />
-                    <SliderRow label="높이" value={pelvisHeightScale} min={0.6} max={1.6} accent="accent-orange-500" onChange={setPelvisHeightScale} />
-                  </>
-                )}
-
-                <div className="my-3 text-[10px] font-semibold uppercase tracking-widest text-ink/30">두께</div>
-                <SliderRow label="박스" value={boxThickness} min={0.15} max={0.8} accent="accent-emerald-500" onChange={setBoxThickness} />
-                <SliderRow label="상완" value={upperArmThickness} min={0.5} max={1.4} accent="accent-sky-500" onChange={setUpperArmThickness} />
-                <SliderRow label="하완" value={lowerArmThickness} min={0.5} max={1.4} accent="accent-blue-500" onChange={setLowerArmThickness} />
-                <SliderRow label="허벅지" value={thighThickness} min={0.5} max={1.4} accent="accent-amber-500" onChange={setThighThickness} />
-                <SliderRow label="종아리" value={calfThickness} min={0.5} max={1.4} accent="accent-rose-500" onChange={setCalfThickness} />
               </div>
             )}
 

@@ -1146,6 +1146,12 @@ function setupGizmoController({
 
   let selectedKey: BoxKey | null = null;
 
+  const toEulerDeg = (q: THREE.Quaternion) => {
+    const e = new THREE.Euler().setFromQuaternion(q, "XYZ");
+    const r2d = 180 / Math.PI;
+    return { x: e.x * r2d, y: e.y * r2d, z: e.z * r2d };
+  };
+
   const handleDraggingChanged = (
     event: THREE.Event<"dragging-changed", TransformControls> & { value: unknown }
   ) => {
@@ -1171,11 +1177,24 @@ function setupGizmoController({
       manual.rotationOffset.copy(base.quaternion).invert().multiply(mesh.quaternion);
 
       // scale: mesh.scale = base.scale * scaleVec (component-wise)
-      manual.scaleVec.set(
-        base.scale.x !== 0 ? mesh.scale.x / base.scale.x : 1,
-        base.scale.y !== 0 ? mesh.scale.y / base.scale.y : 1,
-        base.scale.z !== 0 ? mesh.scale.z / base.scale.z : 1
-      );
+      let sx = base.scale.x !== 0 ? mesh.scale.x / base.scale.x : 1;
+      const sy = base.scale.y !== 0 ? mesh.scale.y / base.scale.y : 1;
+      let sz = base.scale.z !== 0 ? mesh.scale.z / base.scale.z : 1;
+
+      // 팔다리(Limb)인 경우 너비(X)와 깊이(Z)를 동기화 (원통 유지)
+      const isLimb = !["rib", "waist", "pelvis", "head"].includes(selectedKey);
+      if (isLimb) {
+        // 1.0(기본값)에서 더 많이 변화한 축의 값을 따름
+        const devX = Math.abs(sx - 1);
+        const devZ = Math.abs(sz - 1);
+        if (devX > devZ) {
+          sz = sx;
+        } else {
+          sx = sz;
+        }
+      }
+
+      manual.scaleVec.set(sx, sy, sz);
 
       onBoxUpdate?.({
         key: selectedKey,
@@ -1190,22 +1209,19 @@ function setupGizmoController({
   tc.addEventListener("dragging-changed", handleDraggingChanged);
 
   // ── 드래그 중 실시간 변환값 전달 ─────────────────────────────────────
-  const toEulerDeg = (q: THREE.Quaternion) => {
-    const e = new THREE.Euler().setFromQuaternion(q, "XYZ");
-    const r2d = 180 / Math.PI;
-    return { x: e.x * r2d, y: e.y * r2d, z: e.z * r2d };
-  };
-
   const handleChange = () => {
     if (!isDraggingRef.current || !selectedKey) return;
-    const mode = tc.mode as GizmoMode;
-    if (mode !== "rotate" && mode !== "scale") return;
+    
+    // NOTE: 여기서는 mesh.scale을 강제로 수정하지 않음 (기즈모 동작 방해 방지)
+    // 대신 드래그 종료 시(handleDraggingChanged) 동기화하여 저장함.
+
     const base = baseTransformsRef.current[selectedKey];
     const bundle = bundleRef.current;
     if (!base || !bundle) return;
     const box = getBoxVisualByKey(bundle, selectedKey);
     if (!box) return;
     const mesh = box.mesh;
+    
     const posOffset = mesh.position.clone().sub(base.position);
     const rotOffset = base.quaternion.clone().invert().multiply(mesh.quaternion);
     const sv = new THREE.Vector3(
@@ -1213,6 +1229,7 @@ function setupGizmoController({
       base.scale.y !== 0 ? mesh.scale.y / base.scale.y : 1,
       base.scale.z !== 0 ? mesh.scale.z / base.scale.z : 1,
     );
+
     onBoxChange?.({ key: selectedKey, positionOffset: posOffset, rotationOffset: rotOffset, scaleVec: sv, rotEulerDeg: toEulerDeg(rotOffset) });
   };
   tc.addEventListener("change", handleChange);
