@@ -2,11 +2,26 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import PoseOverlay, { BoxKey, GizmoMode, PoseOverlayHandle } from "@/components/PoseOverlay";
+import PoseOverlay, { BoxKey, BoxUpdateInfo, GizmoMode, PoseOverlayHandle } from "@/components/PoseOverlay";
 import { getTodayRecord } from "@/lib/storage";
 
 type GuideMode = "none" | "skeleton" | "box";
 type BoxRenderMode = "off" | "wire" | "solid";
+
+const BOX_KEY_LABEL: Record<string, string> = {
+  head: "머리",
+  rib: "가슴",
+  waist: "허리",
+  pelvis: "골반",
+  leftUpperArm: "왼쪽 상완",
+  rightUpperArm: "오른쪽 상완",
+  leftLowerArm: "왼쪽 하완",
+  rightLowerArm: "오른쪽 하완",
+  leftThigh: "왼쪽 허벅지",
+  rightThigh: "오른쪽 허벅지",
+  leftCalf: "왼쪽 종아리",
+  rightCalf: "오른쪽 종아리",
+};
 
 const BOX_DEFAULTS = {
   boxOpacity: 1,
@@ -97,6 +112,7 @@ export default function Home() {
 
   const poseOverlayRef = useRef<PoseOverlayHandle>(null);
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
+  const [liveBoxInfo, setLiveBoxInfo] = useState<BoxUpdateInfo | null>(null);
   const [activeButtons, setActiveButtons] = useState<Set<string>>(new Set());
 
   const flashButton = useCallback((key: string) => {
@@ -194,6 +210,10 @@ export default function Home() {
     if (guideMode !== "box") setSelectedBoxKey(null);
   }, [guideMode]);
 
+  useEffect(() => {
+    if (gizmoMode === "translate") setLiveBoxInfo(null);
+  }, [gizmoMode]);
+
   const handleLandmarks = useCallback((lm: import("@/components/PoseOverlay").PoseLandmarks | null) => {
     if (lm) {
       setLandmarksReady(true);
@@ -201,6 +221,58 @@ export default function Home() {
     } else {
       setDetectionFailed(true);
     }
+  }, []);
+
+  const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+
+  const handleBoxUpdate = useCallback((info: BoxUpdateInfo) => {
+    const { key, scaleVec } = info;
+    const sx = scaleVec.x, sy = scaleVec.y;
+    // scaleVec이 1에 가까우면 무시 (이동/회전만 한 경우)
+    const hasScale = Math.abs(sx - 1) > 0.001 || Math.abs(sy - 1) > 0.001;
+    if (!hasScale) return;
+
+    switch (key) {
+      case "rib":
+        setRibcageScale((p) => clamp(p * sx, 0.7, 1.5));
+        setRibHeightScale((p) => clamp(p * sy, 0.6, 1.6));
+        break;
+      case "waist":
+        setWaistScale((p) => clamp(p * sx, 0.7, 1.5));
+        setWaistHeightScale((p) => clamp(p * sy, 0.6, 1.6));
+        break;
+      case "pelvis":
+        setPelvisScale((p) => clamp(p * sx, 0.7, 1.5));
+        setPelvisHeightScale((p) => clamp(p * sy, 0.6, 1.6));
+        break;
+      case "head":
+        setHeadScale((p) => clamp(p * sx, 0.5, 2.0));
+        setHeadHeightScale((p) => clamp(p * sy, 0.5, 2.0));
+        break;
+      case "leftUpperArm":
+      case "rightUpperArm":
+        setUpperArmThickness((p) => clamp(p * sx, 0.5, 1.4));
+        break;
+      case "leftLowerArm":
+      case "rightLowerArm":
+        setLowerArmThickness((p) => clamp(p * sx, 0.5, 1.4));
+        break;
+      case "leftThigh":
+      case "rightThigh":
+        setThighThickness((p) => clamp(p * sx, 0.5, 1.4));
+        break;
+      case "leftCalf":
+      case "rightCalf":
+        setCalfThickness((p) => clamp(p * sx, 0.5, 1.4));
+        break;
+    }
+    // scaleVec을 1로 리셋해서 새 슬라이더 값이 두 번 적용되지 않게 함
+    poseOverlayRef.current?.resetScaleForKey(key);
+    setLiveBoxInfo(null);
+  }, []);
+
+  const handleBoxChange = useCallback((info: BoxUpdateInfo) => {
+    setLiveBoxInfo(info);
   }, []);
 
   const handleResetBox = () => {
@@ -511,7 +583,9 @@ export default function Home() {
               lowerArmThickness={lowerArmThickness}
               thighThickness={thighThickness}
               calfThickness={calfThickness}
-              onSelectedKeyChange={setSelectedBoxKey}
+              onBoxUpdate={handleBoxUpdate}
+              onBoxChange={handleBoxChange}
+              onSelectedKeyChange={(key) => { setSelectedBoxKey(key); if (!key) setLiveBoxInfo(null); }}
               onGizmoModeChange={setGizmoMode}
               onAction={flashButton}
               onLandmarks={handleLandmarks}
@@ -533,9 +607,16 @@ export default function Home() {
             {guideMode === "box" && (
               <div className="flex-1 overflow-y-auto p-5">
                 <div className="mb-4 flex items-center justify-between">
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-ink/30">
-                    도형 설정
-                  </p>
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-ink/30">
+                      도형 설정
+                    </p>
+                    {selectedBoxKey && (
+                      <p className="mt-0.5 text-[13px] font-semibold text-ink/70">
+                        {BOX_KEY_LABEL[selectedBoxKey] ?? selectedBoxKey}
+                      </p>
+                    )}
+                  </div>
                   <button
                     onClick={handleResetBox}
                     className="rounded-md border border-ink/10 px-2 py-1 text-[10px] font-medium text-ink/40 transition-colors hover:border-ink/20 hover:text-ink/70"
@@ -570,6 +651,50 @@ export default function Home() {
                 </div>
 
                 <SliderRow label="박스 투명도" value={boxOpacity} min={0.3} max={1} accent="accent-violet-500" onChange={setBoxOpacity} />
+
+                {/* 실시간 변환 수치 — rotate/scale 모드에서 박스 선택 시 즉시 표시 */}
+                {selectedBoxKey && gizmoMode !== "translate" && (
+                  <div className="mb-4 rounded-lg bg-ink/[0.04] p-3">
+                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-ink/30">
+                      {gizmoMode === "rotate" ? "회전 (°)" : "스케일"}
+                    </p>
+                    {gizmoMode === "rotate" && (
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {(["x", "y", "z"] as const).map((axis) => {
+                          const val = liveBoxInfo?.key === selectedBoxKey
+                            ? liveBoxInfo.rotEulerDeg[axis]
+                            : 0;
+                          return (
+                            <div key={axis} className="flex flex-col items-center rounded bg-ink/[0.06] py-1.5">
+                              <span className="text-[9px] uppercase text-ink/30">{axis}</span>
+                              <span className="mt-0.5 text-[12px] font-mono font-semibold tabular-nums text-ink/70">
+                                {val.toFixed(1)}°
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {gizmoMode === "scale" && (
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {(["x", "y", "z"] as const).map((axis) => {
+                          const sv = liveBoxInfo?.key === selectedBoxKey ? liveBoxInfo.scaleVec : null;
+                          const val = sv ? (sv as unknown as Record<string, number>)[axis] : 1;
+                          return (
+                            <div key={axis} className="flex flex-col items-center rounded bg-ink/[0.06] py-1.5">
+                              <span className="text-[9px] uppercase text-ink/30">
+                                {axis === "y" ? "높이" : axis === "x" ? "너비" : "깊이"}
+                              </span>
+                              <span className="mt-0.5 text-[12px] font-mono font-semibold tabular-nums text-ink/70">
+                                {val.toFixed(2)}×
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {selectedBoxKey === "head" && (
                   <>

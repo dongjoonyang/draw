@@ -15,6 +15,8 @@ export type BoxUpdateInfo = {
   positionOffset: THREE.Vector3;
   rotationOffset: THREE.Quaternion;
   scaleVec: THREE.Vector3;
+  /** 회전 오프셋의 오일러 각도 (도 단위) */
+  rotEulerDeg: { x: number; y: number; z: number };
 };
 
 type Props = {
@@ -37,8 +39,10 @@ type Props = {
   thighThickness?: number;
   calfThickness?: number;
   onLandmarks?: (landmarks: PoseLandmarks | null) => void;
-  /** 기즈모로 박스 변환 시 부모에게 변경값 전달 */
+  /** 기즈모로 박스 변환 시 부모에게 변경값 전달 (드래그 종료 시) */
   onBoxUpdate?: (info: BoxUpdateInfo) => void;
+  /** 기즈모 드래그 중 실시간 변환값 전달 */
+  onBoxChange?: (info: BoxUpdateInfo) => void;
   /** 선택된 박스 키 변경 시 부모에게 전달 */
   onSelectedKeyChange?: (key: BoxKey | null) => void;
   /** CSS transform scale 값 (기본 1) */
@@ -53,6 +57,7 @@ export type PoseOverlayHandle = {
   deleteSelected: () => void;
   resetHidden: () => void;
   setGizmoMode: (mode: GizmoMode) => void;
+  resetScaleForKey: (key: BoxKey) => void;
 };
 
 // ── Pose landmark indices ────────────────────────────────────────────────────
@@ -176,6 +181,7 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
   calfThickness = 0.88,
   onLandmarks,
   onBoxUpdate,
+  onBoxChange,
   onSelectedKeyChange,
   onGizmoModeChange,
   onAction,
@@ -229,6 +235,9 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
     },
     setGizmoMode: (mode: GizmoMode) => {
       gizmoModeSetterRef.current?.(mode);
+    },
+    resetScaleForKey: (key: BoxKey) => {
+      manualRef.current[key].scaleVec.set(1, 1, 1);
     },
   }));
   const onActionRef = useRef(onAction);
@@ -886,9 +895,10 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
       manualRef,
       baseTransformsRef,
       bundleRef,
-      onModeChange: setGizmoMode,
+      onModeChange: (mode) => { setGizmoMode(mode); onGizmoModeChange?.(mode); },
       onSelectChange: (key) => { currentSelectedKeyRef.current = key; setSelectedKey(key); },
       onBoxUpdate,
+      onBoxChange,
       isDraggingRef,
       flashRef: flashSetterRef,
       hiddenKeysRef,
@@ -1040,6 +1050,7 @@ type GizmoControllerParams = {
   onModeChange: (mode: GizmoMode) => void;
   onSelectChange: (key: BoxKey | null) => void;
   onBoxUpdate?: (info: BoxUpdateInfo) => void;
+  onBoxChange?: (info: BoxUpdateInfo) => void;
   isDraggingRef: React.MutableRefObject<boolean>;
   flashRef: React.MutableRefObject<((key: string) => void) | null>;
   hiddenKeysRef: React.MutableRefObject<Set<BoxKey>>;
@@ -1057,6 +1068,7 @@ function setupGizmoController({
   onModeChange,
   onSelectChange,
   onBoxUpdate,
+  onBoxChange,
   isDraggingRef,
   flashRef,
   hiddenKeysRef,
@@ -1104,11 +1116,40 @@ function setupGizmoController({
         positionOffset: manual.positionOffset.clone(),
         rotationOffset: manual.rotationOffset.clone(),
         scaleVec: manual.scaleVec.clone(),
+        rotEulerDeg: toEulerDeg(manual.rotationOffset),
       });
     }
   };
 
   tc.addEventListener("dragging-changed", handleDraggingChanged);
+
+  // ── 드래그 중 실시간 변환값 전달 ─────────────────────────────────────
+  const toEulerDeg = (q: THREE.Quaternion) => {
+    const e = new THREE.Euler().setFromQuaternion(q, "XYZ");
+    const r2d = 180 / Math.PI;
+    return { x: e.x * r2d, y: e.y * r2d, z: e.z * r2d };
+  };
+
+  const handleChange = () => {
+    if (!isDraggingRef.current || !selectedKey) return;
+    const mode = tc.mode as GizmoMode;
+    if (mode !== "rotate" && mode !== "scale") return;
+    const base = baseTransformsRef.current[selectedKey];
+    const bundle = bundleRef.current;
+    if (!base || !bundle) return;
+    const box = getBoxVisualByKey(bundle, selectedKey);
+    if (!box) return;
+    const mesh = box.mesh;
+    const posOffset = mesh.position.clone().sub(base.position);
+    const rotOffset = base.quaternion.clone().invert().multiply(mesh.quaternion);
+    const sv = new THREE.Vector3(
+      base.scale.x !== 0 ? mesh.scale.x / base.scale.x : 1,
+      base.scale.y !== 0 ? mesh.scale.y / base.scale.y : 1,
+      base.scale.z !== 0 ? mesh.scale.z / base.scale.z : 1,
+    );
+    onBoxChange?.({ key: selectedKey, positionOffset: posOffset, rotationOffset: rotOffset, scaleVec: sv, rotEulerDeg: toEulerDeg(rotOffset) });
+  };
+  tc.addEventListener("change", handleChange);
 
   // ── 박스 클릭으로 선택 ────────────────────────────────────────────────
   const getPointerNdc = (event: PointerEvent) => {
@@ -1220,6 +1261,7 @@ function setupGizmoController({
 
   const destroy = () => {
     tc.removeEventListener("dragging-changed", handleDraggingChanged);
+    tc.removeEventListener("change", handleChange);
     renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
     window.removeEventListener("keydown", handleKeyDown);
     tc.detach();
