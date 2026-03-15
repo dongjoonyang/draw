@@ -163,6 +163,7 @@ export default function Home() {
   }, [fetchPhotos]);
 
   useEffect(() => {
+    if (selectedPhoto) return; // 상세 뷰에서는 sentinel이 없으므로 skip
     const el = loaderRef.current;
     if (!el) return;
     const observer = new IntersectionObserver(
@@ -175,10 +176,11 @@ export default function Home() {
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [hasMore, error, fetchPhotos]);
+  }, [hasMore, error, fetchPhotos, selectedPhoto]);
 
   // 로드 완료 후 sentinel이 여전히 화면 안에 있으면 추가 로드
   useEffect(() => {
+    if (selectedPhoto) return;
     if (loading || loadingMore || !hasMore || !!error) return;
     const el = loaderRef.current;
     if (!el) return;
@@ -186,7 +188,7 @@ export default function Home() {
     if (rect.top < window.innerHeight + 400) {
       fetchPhotos(pageRef.current);
     }
-  }, [loading, loadingMore, hasMore, error, fetchPhotos]);
+  }, [loading, loadingMore, hasMore, error, fetchPhotos, selectedPhoto]);
 
   useEffect(() => {
     if (guideMode !== "box") setSelectedBoxKey(null);
