@@ -70,8 +70,13 @@ function SliderRow({
 export default function Home() {
   const [photos, setPhotos] = useState<UnsplashPhoto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(true);
   const [selectedPhoto, setSelectedPhoto] = useState<UnsplashPhoto | null>(null);
+  const loaderRef = useRef<HTMLDivElement>(null);
+  const fetchingRef = useRef(false);
+  const pageRef = useRef(1);
   const [guideMode, setGuideMode] = useState<GuideMode>("none");
   const [landmarksReady, setLandmarksReady] = useState(false);
   const [practiceZoom, setPracticeZoom] = useState(1);
@@ -99,26 +104,64 @@ export default function Home() {
   const [thighThickness, setThighThickness] = useState(BOX_DEFAULTS.thighThickness);
   const [calfThickness, setCalfThickness] = useState(BOX_DEFAULTS.calfThickness);
 
-  const fetchPhotos = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const fetchPhotos = useCallback(async (pageNum: number) => {
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
+    if (pageNum === 1) {
+      setLoading(true);
+      setError(null);
+    } else {
+      setLoadingMore(true);
+    }
     try {
-      const page = Math.floor(Math.random() * 5) + 1;
-      const res = await fetch(`/api/unsplash?page=${page}`);
+      const res = await fetch(`/api/unsplash?page=${pageNum}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to fetch");
-      setPhotos(Array.isArray(data) ? data : []);
+      const newPhotos: UnsplashPhoto[] = Array.isArray(data) ? data : [];
+      if (newPhotos.length === 0) {
+        setHasMore(false);
+      } else {
+        setPhotos((prev) => {
+          const existingIds = new Set(prev.map((p) => p.id));
+          const unique = newPhotos.filter((p) => !existingIds.has(p.id));
+          return pageNum === 1 ? newPhotos : [...prev, ...unique];
+        });
+        pageRef.current = pageNum + 1;
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "사진을 불러올 수 없습니다.");
-      setPhotos([]);
+      if (pageNum === 1) setPhotos([]);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
+      fetchingRef.current = false;
     }
   }, []);
 
-  useEffect(() => {
-    fetchPhotos();
+  const refreshPhotos = useCallback(() => {
+    pageRef.current = 1;
+    setHasMore(true);
+    fetchPhotos(1);
   }, [fetchPhotos]);
+
+  useEffect(() => {
+    fetchPhotos(1);
+  }, [fetchPhotos]);
+
+  useEffect(() => {
+    const el = loaderRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !fetchingRef.current) {
+          fetchPhotos(pageRef.current);
+        }
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, fetchPhotos]);
 
   useEffect(() => {
     if (guideMode !== "box") setSelectedBoxKey(null);
@@ -463,7 +506,7 @@ export default function Home() {
             대시보드
           </Link>
           <button
-            onClick={fetchPhotos}
+            onClick={refreshPhotos}
             className="rounded-lg border border-accent/30 bg-white px-4 py-1.5 text-xs font-semibold text-accent shadow-sm transition-colors hover:bg-accent/5"
           >
             새 사진 불러오기
@@ -522,6 +565,10 @@ export default function Home() {
             </div>
           </>
         )}
+        <div ref={loaderRef} className="mt-6 flex justify-center pb-6">
+          {loadingMore && <p className="text-sm text-ink/40">사진 불러오는 중…</p>}
+          {!hasMore && photos.length > 0 && <p className="text-xs text-ink/30">모든 사진을 불러왔습니다</p>}
+        </div>
       </div>
     </main>
   );
