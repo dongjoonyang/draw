@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as THREE from "three";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 
@@ -43,6 +43,16 @@ type Props = {
   onSelectedKeyChange?: (key: BoxKey | null) => void;
   /** CSS transform scale 값 (기본 1) */
   zoom?: number;
+  /** 기즈모 모드 변경 시 부모에게 전달 */
+  onGizmoModeChange?: (mode: GizmoMode) => void;
+  /** 키보드 단축키 또는 액션 발생 시 부모에게 전달 ("translate"|"rotate"|"scale"|"delete"|"reset") */
+  onAction?: (key: string) => void;
+};
+
+export type PoseOverlayHandle = {
+  deleteSelected: () => void;
+  resetHidden: () => void;
+  setGizmoMode: (mode: GizmoMode) => void;
 };
 
 // ── Pose landmark indices ────────────────────────────────────────────────────
@@ -145,7 +155,7 @@ const GIZMO_MODE_LABEL: Record<GizmoMode, string> = {
 };
 
 // ── Component ────────────────────────────────────────────────────────────────
-export default function PoseOverlay({
+const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
   imageSrc,
   guideMode,
   boxOpacity = 0.85,
@@ -167,8 +177,10 @@ export default function PoseOverlay({
   onLandmarks,
   onBoxUpdate,
   onSelectedKeyChange,
+  onGizmoModeChange,
+  onAction,
   zoom = 1,
-}: Props) {
+}: Props, ref) {
   const skeletonCanvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const threeLayerRef = useRef<HTMLDivElement>(null);
@@ -201,10 +213,29 @@ export default function PoseOverlay({
   const [selectedKey, setSelectedKey] = useState<BoxKey | null>(null);
   const [flashKey, setFlashKey] = useState<string | null>(null);
   const gizmoModeSetterRef = useRef<((mode: GizmoMode) => void) | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    deleteSelected: () => {
+      const key = currentSelectedKeyRef.current;
+      if (key) triggerDeleteRef.current?.(key);
+    },
+    resetHidden: () => {
+      triggerResetHiddenRef.current?.();
+      for (const key of ALL_BOX_KEYS) {
+        manualRef.current[key].positionOffset.set(0, 0, 0);
+        manualRef.current[key].rotationOffset.set(0, 0, 0, 1);
+        manualRef.current[key].scaleVec.set(1, 1, 1);
+      }
+    },
+    setGizmoMode: (mode: GizmoMode) => {
+      gizmoModeSetterRef.current?.(mode);
+    },
+  }));
+  const onActionRef = useRef(onAction);
+  onActionRef.current = onAction;
   const flashSetterRef = useRef<((key: string) => void) | null>(null);
   flashSetterRef.current = (key: string) => {
-    setFlashKey(key);
-    setTimeout(() => setFlashKey(null), 150);
+    onActionRef.current?.(key);
   };
 
   const showGuide = guideMode === "skeleton" || guideMode === "box";
@@ -867,6 +898,7 @@ export default function PoseOverlay({
     gizmoModeSetterRef.current = (mode: GizmoMode) => {
       tc.setMode(mode);
       setGizmoMode(mode);
+      onGizmoModeChange?.(mode);
     };
 
     // ── 렌더 루프 ─────────────────────────────────────────────────────────
@@ -969,55 +1001,6 @@ export default function PoseOverlay({
         />
       )}
 
-      {/* 기즈모 모드 HUD */}
-      {showThree && selectedKey && (
-        <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 gap-2">
-          {(["translate", "rotate", "scale"] as GizmoMode[]).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                gizmoModeSetterRef.current?.(mode);
-              }}
-              className={`rounded px-3 py-1.5 text-xs font-mono select-none touch-manipulation transition-transform duration-75 active:scale-90 ${
-                flashKey === mode ? "scale-90 opacity-60" : "scale-100"
-              } ${
-                gizmoMode === mode
-                  ? "bg-white/90 text-black"
-                  : "bg-black/40 text-white/60"
-              }`}
-            >
-              {GIZMO_MODE_LABEL[mode]}
-            </button>
-          ))}
-          <button
-            type="button"
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              if (selectedKey) triggerDeleteRef.current?.(selectedKey);
-            }}
-            className="rounded px-3 py-1.5 text-xs font-mono select-none touch-manipulation bg-red-500/80 text-white transition-transform duration-75 active:scale-90"
-          >
-            ⌫ 삭제
-          </button>
-          <button
-            type="button"
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              triggerResetHiddenRef.current?.();
-              for (const key of ALL_BOX_KEYS) {
-                manualRef.current[key].positionOffset.set(0, 0, 0);
-                manualRef.current[key].rotationOffset.set(0, 0, 0, 1);
-                manualRef.current[key].scaleVec.set(1, 1, 1);
-              }
-            }}
-            className={`rounded px-3 py-1.5 text-xs font-mono select-none touch-manipulation bg-orange-500/80 text-white transition-transform duration-75 active:scale-90 ${flashKey === "q" ? "scale-90 opacity-60" : "scale-100"}`}
-          >
-            초기화 (Q)
-          </button>
-        </div>
-      )}
 
       {showGuide && loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/20 text-sm text-white">
@@ -1041,7 +1024,9 @@ export default function PoseOverlay({
       )}
     </div>
   );
-}
+});
+
+export default PoseOverlay;
 
 // ── 기즈모 컨트롤러 (분리된 설정 함수) ─────────────────────────────────────
 type GizmoControllerParams = {
@@ -1193,7 +1178,7 @@ function setupGizmoController({
         flashRef.current?.("scale");
         break;
       case "q":
-        flashRef.current?.("q");
+        flashRef.current?.("reset");
         hiddenKeysRef.current.clear();
         for (const key of ALL_BOX_KEYS) {
           manualRef.current[key].positionOffset.set(0, 0, 0);
@@ -1204,6 +1189,7 @@ function setupGizmoController({
       case "backspace": {
         const delKey = currentSelectedKeyRef.current ?? selectedKey;
         if (delKey) {
+          flashRef.current?.("delete");
           hiddenKeysRef.current.add(delKey);
           const bundle = bundleRef.current;
           if (bundle) {

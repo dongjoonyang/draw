@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import PoseOverlay, { BoxKey } from "@/components/PoseOverlay";
+import PoseOverlay, { BoxKey, GizmoMode, PoseOverlayHandle } from "@/components/PoseOverlay";
 import { getTodayRecord } from "@/lib/storage";
 
 type GuideMode = "none" | "skeleton" | "box";
@@ -95,6 +95,14 @@ export default function Home() {
   const panStartRef = useRef({ x: 0, y: 0 });
   const panBaseRef = useRef({ x: 0, y: 0 });
 
+  const poseOverlayRef = useRef<PoseOverlayHandle>(null);
+  const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
+  const [activeButtons, setActiveButtons] = useState<Set<string>>(new Set());
+
+  const flashButton = useCallback((key: string) => {
+    setActiveButtons((prev) => { const n = new Set(prev); n.add(key); return n; });
+    setTimeout(() => setActiveButtons((prev) => { const n = new Set(prev); n.delete(key); return n; }), 200);
+  }, []);
   const [boxOpacity, setBoxOpacity] = useState(BOX_DEFAULTS.boxOpacity);
   const [boxRenderMode, setBoxRenderMode] = useState<BoxRenderMode>(BOX_DEFAULTS.boxRenderMode);
   const [selectedBoxKey, setSelectedBoxKey] = useState<BoxKey | null>(null);
@@ -405,27 +413,84 @@ export default function Home() {
               <div className="mb-0.5 font-medium">캔버스 조작</div>
               <div className="text-white/60">Space + 드래그 · 이동 &nbsp;·&nbsp; 휠 · 줌 인/아웃</div>
             </div>
-            <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
-              <button
-                onPointerDown={() => setPracticeZoom((p) => Math.min(4, +(p + 0.2).toFixed(2)))}
-                className="rounded bg-black/30 px-2 py-0.5 text-sm text-white/70 hover:bg-black/50"
-              >+</button>
-              <span className="rounded bg-black/20 px-1.5 py-0.5 text-[10px] text-white/60 tabular-nums">
-                {Math.round(practiceZoom * 100)}%
-              </span>
-              <button
-                onPointerDown={() => setPracticeZoom((p) => Math.max(0.3, +(p - 0.2).toFixed(2)))}
-                className="rounded bg-black/30 px-2 py-0.5 text-sm text-white/70 hover:bg-black/50"
-              >−</button>
-              {practiceZoom !== 1 && (
+            <div className="absolute right-2 top-2 z-10 flex flex-col items-end gap-2">
+              {/* 줌 버튼 */}
+              <div className="flex items-center gap-1">
                 <button
-                  onPointerDown={() => setPracticeZoom(1)}
-                  className="rounded bg-black/30 px-2 py-0.5 text-[10px] text-white/70 hover:bg-black/50"
-                >↺</button>
+                  onPointerDown={() => setPracticeZoom((p) => Math.min(4, +(p + 0.2).toFixed(2)))}
+                  className="rounded bg-black/30 px-2 py-0.5 text-sm text-white/70 hover:bg-black/50"
+                >+</button>
+                <span className="rounded bg-black/20 px-1.5 py-0.5 text-[10px] text-white/60 tabular-nums">
+                  {Math.round(practiceZoom * 100)}%
+                </span>
+                <button
+                  onPointerDown={() => setPracticeZoom((p) => Math.max(0.3, +(p - 0.2).toFixed(2)))}
+                  className="rounded bg-black/30 px-2 py-0.5 text-sm text-white/70 hover:bg-black/50"
+                >−</button>
+                {practiceZoom !== 1 && (
+                  <button
+                    onPointerDown={() => setPracticeZoom(1)}
+                    className="rounded bg-black/30 px-2 py-0.5 text-[10px] text-white/70 hover:bg-black/50"
+                  >↺</button>
+                )}
+              </div>
+
+              {/* 도형화 컨트롤 버튼 — 세로 나열 */}
+              {guideMode === "box" && (
+                <div className="flex flex-col gap-1 w-24">
+                  {(["translate", "rotate", "scale"] as GizmoMode[]).map((mode) => {
+                    const label = mode === "translate" ? "이동" : mode === "rotate" ? "회전" : "스케일";
+                    const shortcut = mode === "translate" ? "T" : mode === "rotate" ? "R" : "S";
+                    const isActive = activeButtons.has(mode);
+                    const isSelected = gizmoMode === mode;
+                    return (
+                      <button
+                        key={mode}
+                        onPointerDown={() => {
+                          poseOverlayRef.current?.setGizmoMode(mode);
+                          flashButton(mode);
+                        }}
+                        className={`flex items-center justify-between rounded px-2.5 py-1.5 text-[11px] font-mono select-none transition-all duration-75 ${
+                          isSelected
+                            ? "bg-white/90 text-black shadow-[0_0_0_2px_rgba(255,255,255,0.6)]"
+                            : "bg-black/40 text-white/60 hover:bg-black/60"
+                        } ${isActive ? "scale-95 brightness-150" : "scale-100"}`}
+                      >
+                        <span>{label}</span>
+                        <span className="rounded bg-white/20 px-1 py-0.5 text-[9px] leading-none opacity-70">{shortcut}</span>
+                      </button>
+                    );
+                  })}
+
+                  {selectedBoxKey && (
+                    <button
+                      onPointerDown={() => {
+                        poseOverlayRef.current?.deleteSelected();
+                        flashButton("delete");
+                      }}
+                      className={`flex items-center justify-between rounded bg-red-500/80 px-2.5 py-1.5 text-[11px] text-white hover:bg-red-500 select-none transition-all duration-75 ${activeButtons.has("delete") ? "scale-95 brightness-150" : "scale-100"}`}
+                    >
+                      <span>삭제</span>
+                      <span className="rounded bg-white/20 px-1 py-0.5 text-[9px] leading-none opacity-70">⌫</span>
+                    </button>
+                  )}
+
+                  <button
+                    onPointerDown={() => {
+                      poseOverlayRef.current?.resetHidden();
+                      flashButton("reset");
+                    }}
+                    className={`flex items-center justify-between rounded bg-orange-500/80 px-2.5 py-1.5 text-[11px] text-white hover:bg-orange-500 select-none transition-all duration-75 ${activeButtons.has("reset") ? "scale-95 brightness-150" : "scale-100"}`}
+                  >
+                    <span>초기화</span>
+                    <span className="rounded bg-white/20 px-1 py-0.5 text-[9px] leading-none opacity-70">Q</span>
+                  </button>
+                </div>
               )}
             </div>
             <div style={{ transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${practiceZoom})`, transformOrigin: "center center", transition: isPanning ? "none" : "transform 0.05s ease-out" }}>
             <PoseOverlay
+              ref={poseOverlayRef}
               imageSrc={selectedPhoto.urls.full ?? selectedPhoto.urls.regular}
               guideMode={guideMode}
               boxOpacity={boxOpacity}
@@ -445,6 +510,8 @@ export default function Home() {
               thighThickness={thighThickness}
               calfThickness={calfThickness}
               onSelectedKeyChange={setSelectedBoxKey}
+              onGizmoModeChange={setGizmoMode}
+              onAction={flashButton}
               onLandmarks={handleLandmarks}
               zoom={practiceZoom}
             />
