@@ -155,7 +155,7 @@ export default function Home() {
     if (!el) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !fetchingRef.current) {
+        if (entries[0].isIntersecting && hasMore && !error && !fetchingRef.current) {
           fetchPhotos(pageRef.current);
         }
       },
@@ -163,18 +163,18 @@ export default function Home() {
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [hasMore, fetchPhotos]);
+  }, [hasMore, error, fetchPhotos]);
 
   // 로드 완료 후 sentinel이 여전히 화면 안에 있으면 추가 로드
   useEffect(() => {
-    if (loading || loadingMore || !hasMore) return;
+    if (loading || loadingMore || !hasMore || !!error) return;
     const el = loaderRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
     if (rect.top < window.innerHeight + 400) {
       fetchPhotos(pageRef.current);
     }
-  }, [loading, loadingMore, hasMore, fetchPhotos]);
+  }, [loading, loadingMore, hasMore, error, fetchPhotos]);
 
   useEffect(() => {
     if (guideMode !== "box") setSelectedBoxKey(null);

@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 
+// 서버 메모리 캐시 (page → 결과)
+const cache = new Map<number, { data: unknown; cachedAt: number }>();
+const CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 24시간
+
 const QUERIES = [
   "fashion model full body photography",
   "ballet dancer full body",
@@ -32,9 +36,15 @@ export async function GET(request: Request) {
   const subPage = ((page - 1) % PAGES_PER_QUERY) + 1;
   const query = QUERIES[queryIndex];
 
+  // 캐시 확인
+  const cached = cache.get(page);
+  if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
+    return NextResponse.json(cached.data);
+  }
+
   try {
     const res = await fetch(
-      `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&page=${subPage}&per_page=30&orientation=portrait`,
+      `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&page=${subPage}&per_page=30`,
       {
         headers: {
           Authorization: `Client-ID ${accessKey}`,
@@ -52,7 +62,12 @@ export async function GET(request: Request) {
     }
 
     const data = await res.json();
-    return NextResponse.json(data.results ?? []);
+    const results = data.results ?? [];
+
+    // 캐시 저장
+    cache.set(page, { data: results, cachedAt: Date.now() });
+
+    return NextResponse.json(results);
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Unknown error" },
