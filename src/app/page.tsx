@@ -123,8 +123,12 @@ export default function Home() {
       } else {
         setPhotos((prev) => {
           const existingIds = new Set(prev.map((p) => p.id));
-          const unique = newPhotos.filter((p) => !existingIds.has(p.id));
-          return pageNum === 1 ? newPhotos : [...prev, ...unique];
+          const unique = newPhotos.filter((p) => {
+            if (existingIds.has(p.id)) return false;
+            existingIds.add(p.id);
+            return true;
+          });
+          return pageNum === 1 ? unique : [...prev, ...unique];
         });
         pageRef.current = pageNum + 1;
       }
@@ -138,13 +142,7 @@ export default function Home() {
     }
   }, []);
 
-  const refreshPhotos = useCallback(() => {
-    pageRef.current = 1;
-    setHasMore(true);
-    fetchPhotos(1);
-  }, [fetchPhotos]);
-
-  useEffect(() => {
+useEffect(() => {
     fetchPhotos(1);
   }, [fetchPhotos]);
 
@@ -523,12 +521,6 @@ export default function Home() {
           >
             대시보드
           </Link>
-          <button
-            onClick={refreshPhotos}
-            className="rounded-lg border border-accent/30 bg-white px-4 py-1.5 text-xs font-semibold text-accent shadow-sm transition-colors hover:bg-accent/5"
-          >
-            새 사진 불러오기
-          </button>
         </div>
       </header>
 

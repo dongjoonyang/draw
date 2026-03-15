@@ -1,10 +1,21 @@
 import { NextResponse } from "next/server";
 
-const FIGURE_DRAWING_COLLECTION_ID = "3612985"; // Poses for figure drawing
+const QUERIES = [
+  "fashion model full body photography",
+  "ballet dancer full body",
+  "fitness model full body",
+  "street fashion full body",
+  "gymnastics athlete full body",
+  "martial arts fighter full body",
+  "running athlete full body",
+  "contemporary dance full body",
+];
+
+const PAGES_PER_QUERY = 15; // 쿼리당 15페이지 × 30장 = 450장
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const page = searchParams.get("page") || "1";
+  const page = parseInt(searchParams.get("page") || "1", 10);
 
   const accessKey =
     process.env.UNSPLASH_ACCESS_KEY ||
@@ -17,9 +28,13 @@ export async function GET(request: Request) {
     );
   }
 
+  const queryIndex = Math.floor((page - 1) / PAGES_PER_QUERY) % QUERIES.length;
+  const subPage = ((page - 1) % PAGES_PER_QUERY) + 1;
+  const query = QUERIES[queryIndex];
+
   try {
     const res = await fetch(
-      `https://api.unsplash.com/collections/${FIGURE_DRAWING_COLLECTION_ID}/photos?page=${page}&per_page=30&orientation=portrait`,
+      `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&page=${subPage}&per_page=30&orientation=portrait`,
       {
         headers: {
           Authorization: `Client-ID ${accessKey}`,
@@ -37,7 +52,7 @@ export async function GET(request: Request) {
     }
 
     const data = await res.json();
-    return NextResponse.json(data);
+    return NextResponse.json(data.results ?? []);
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Unknown error" },
