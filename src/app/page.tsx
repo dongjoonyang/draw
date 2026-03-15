@@ -144,7 +144,7 @@ export default function Home() {
     }
   }, []);
 
-useEffect(() => {
+  useEffect(() => {
     fetchPhotos(1);
   }, [fetchPhotos]);
 
@@ -157,11 +157,22 @@ useEffect(() => {
           fetchPhotos(pageRef.current);
         }
       },
-      { threshold: 0.1 }
+      { threshold: 0, rootMargin: "400px" }
     );
     observer.observe(el);
     return () => observer.disconnect();
   }, [hasMore, fetchPhotos]);
+
+  // 로드 완료 후 sentinel이 여전히 화면 안에 있으면 추가 로드
+  useEffect(() => {
+    if (loading || loadingMore || !hasMore) return;
+    const el = loaderRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.top < window.innerHeight + 400) {
+      fetchPhotos(pageRef.current);
+    }
+  }, [loading, loadingMore, hasMore, fetchPhotos]);
 
   useEffect(() => {
     if (guideMode !== "box") setSelectedBoxKey(null);
