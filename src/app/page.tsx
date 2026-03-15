@@ -74,6 +74,8 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [selectedPhoto, setSelectedPhoto] = useState<UnsplashPhoto | null>(null);
+  const [detectionFailed, setDetectionFailed] = useState(false);
+  const [failedPhotoIds, setFailedPhotoIds] = useState<Set<string>>(new Set());
   const loaderRef = useRef<HTMLDivElement>(null);
   const fetchingRef = useRef(false);
   const pageRef = useRef(1);
@@ -166,7 +168,12 @@ useEffect(() => {
   }, [guideMode]);
 
   const handleLandmarks = useCallback((lm: import("@/components/PoseOverlay").PoseLandmarks | null) => {
-    if (lm) setLandmarksReady(true);
+    if (lm) {
+      setLandmarksReady(true);
+      setDetectionFailed(false);
+    } else {
+      setDetectionFailed(true);
+    }
   }, []);
 
   const handleResetBox = () => {
@@ -190,6 +197,7 @@ useEffect(() => {
     setSelectedPhoto(photo);
     setGuideMode("none");
     setLandmarksReady(false);
+    setDetectionFailed(false);
     setPracticeZoom(1);
     setPanOffset({ x: 0, y: 0 });
     setShowHint(true);
@@ -197,6 +205,10 @@ useEffect(() => {
   };
 
   const handleBack = () => {
+    if (detectionFailed && selectedPhoto) {
+      setFailedPhotoIds((prev) => new Set([...prev, selectedPhoto.id]));
+    }
+    setDetectionFailed(false);
     setSelectedPhoto(null);
     setGuideMode("none");
   };
@@ -570,6 +582,11 @@ useEffect(() => {
                   <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-3 py-2">
                     <p className="truncate text-[10px] text-white/70">© {photo.user.name}</p>
                   </div>
+                  {failedPhotoIds.has(photo.id) && (
+                    <div className="absolute right-2 top-2 rounded-full bg-red-500/80 px-2 py-0.5 text-[10px] font-medium text-white">
+                      감지 불가
+                    </div>
+                  )}
                 </button>
               ))}
             </div>

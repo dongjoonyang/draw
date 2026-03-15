@@ -188,6 +188,7 @@ export default function PoseOverlay({
   const [landmarks, setLandmarks] = useState<PoseLandmarks | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [detectionAttempted, setDetectionAttempted] = useState(false);
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
   const [selectedKey, setSelectedKey] = useState<BoxKey | null>(null);
   const [flashKey, setFlashKey] = useState<string | null>(null);
@@ -231,7 +232,7 @@ export default function PoseOverlay({
         const poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath:
-              "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+              "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
           },
           runningMode: "IMAGE",
         });
@@ -256,6 +257,7 @@ export default function PoseOverlay({
         onLandmarks?.(null);
       } finally {
         setLoading(false);
+        setDetectionAttempted(true);
       }
     };
 
@@ -269,6 +271,7 @@ export default function PoseOverlay({
     if (!showGuide || !imageSrc) {
       setLandmarks(null);
       setError(null);
+      setDetectionAttempted(false);
     }
   }, [showGuide, imageSrc]);
 
@@ -931,6 +934,15 @@ export default function PoseOverlay({
       {showGuide && loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/20 text-sm text-white">
           분석 중…
+        </div>
+      )}
+
+      {showGuide && detectionAttempted && !loading && !error && !landmarks && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="rounded-xl bg-black/60 px-5 py-3 text-center backdrop-blur-sm">
+            <p className="text-sm font-medium text-white">포즈를 감지할 수 없습니다</p>
+            <p className="mt-1 text-xs text-white/60">다른 사진을 선택해 주세요</p>
+          </div>
         </div>
       )}
 
