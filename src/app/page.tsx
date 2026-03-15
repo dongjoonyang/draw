@@ -226,7 +226,7 @@ export default function Home() {
 
   const handleBack = () => {
     if (detectionFailed && selectedPhoto) {
-      setFailedPhotoIds((prev) => new Set([...prev, selectedPhoto.id]));
+      setFailedPhotoIds((prev) => { const next = new Set(prev); next.add(selectedPhoto.id); return next; });
     }
     setDetectionFailed(false);
     setSelectedPhoto(null);
@@ -244,7 +244,7 @@ export default function Home() {
         setPanOffset({ x: 0, y: 0 });
       } else {
         if (detectionFailed && selectedPhoto) {
-          setFailedPhotoIds((prev) => new Set([...prev, selectedPhoto.id]));
+          setFailedPhotoIds((prev) => { const next = new Set(prev); next.add(selectedPhoto.id); return next; });
         }
         setDetectionFailed(false);
         setSelectedPhoto(null);
@@ -573,7 +573,7 @@ export default function Home() {
           <div className="flex h-full flex-col items-center justify-center gap-4">
             <p className="text-sm text-ink/50">{error}</p>
             <button
-              onClick={fetchPhotos}
+              onClick={() => fetchPhotos(1)}
               className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white shadow-sm shadow-accent/30 hover:opacity-90"
             >
               다시 시도
