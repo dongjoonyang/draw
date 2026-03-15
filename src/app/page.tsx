@@ -223,15 +223,18 @@ export default function Home() {
     }
   }, []);
 
-  const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
-
   const handleBoxUpdate = useCallback((info: BoxUpdateInfo) => {
     const { key, scaleVec } = info;
     const sx = scaleVec.x, sy = scaleVec.y;
-    // scaleVec이 1에 가까우면 무시 (이동/회전만 한 경우)
     const hasScale = Math.abs(sx - 1) > 0.001 || Math.abs(sy - 1) > 0.001;
     if (!hasScale) return;
 
+    // absorbScale atomically updates the internal refs AND resets scaleVec to 1
+    // so the next RAF frame uses newBase × 1 = correct visual
+    poseOverlayRef.current?.absorbScale(key, sx, sy);
+
+    // Update React state for UI slider display (async, for display only)
+    const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
     switch (key) {
       case "rib":
         setRibcageScale((p) => clamp(p * sx, 0.7, 1.5));
@@ -266,8 +269,6 @@ export default function Home() {
         setCalfThickness((p) => clamp(p * sx, 0.5, 1.4));
         break;
     }
-    // scaleVec을 1로 리셋해서 새 슬라이더 값이 두 번 적용되지 않게 함
-    poseOverlayRef.current?.resetScaleForKey(key);
     setLiveBoxInfo(null);
   }, []);
 

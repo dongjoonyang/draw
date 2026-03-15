@@ -58,6 +58,7 @@ export type PoseOverlayHandle = {
   resetHidden: () => void;
   setGizmoMode: (mode: GizmoMode) => void;
   resetScaleForKey: (key: BoxKey) => void;
+  absorbScale: (key: BoxKey, sx: number, sy: number) => void;
 };
 
 // ── Pose landmark indices ────────────────────────────────────────────────────
@@ -207,6 +208,36 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
   const rafRef = useRef<number | null>(null);
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
+  const ribcageScaleRef = useRef(ribcageScale);
+  ribcageScaleRef.current = ribcageScale;
+  const ribHeightScaleRef = useRef(ribHeightScale);
+  ribHeightScaleRef.current = ribHeightScale;
+  const waistScaleRef = useRef(waistScale);
+  waistScaleRef.current = waistScale;
+  const waistHeightScaleRef = useRef(waistHeightScale);
+  waistHeightScaleRef.current = waistHeightScale;
+  const pelvisScaleRef = useRef(pelvisScale);
+  pelvisScaleRef.current = pelvisScale;
+  const pelvisHeightScaleRef = useRef(pelvisHeightScale);
+  pelvisHeightScaleRef.current = pelvisHeightScale;
+  const headScaleRef = useRef(headScale);
+  headScaleRef.current = headScale;
+  const headHeightScaleRef = useRef(headHeightScale);
+  headHeightScaleRef.current = headHeightScale;
+  const boxThicknessRef = useRef(boxThickness);
+  boxThicknessRef.current = boxThickness;
+  const upperArmThicknessRef = useRef(upperArmThickness);
+  upperArmThicknessRef.current = upperArmThickness;
+  const lowerArmThicknessRef = useRef(lowerArmThickness);
+  lowerArmThicknessRef.current = lowerArmThickness;
+  const thighThicknessRef = useRef(thighThickness);
+  thighThicknessRef.current = thighThickness;
+  const calfThicknessRef = useRef(calfThickness);
+  calfThicknessRef.current = calfThickness;
+  const boxOpacityRef = useRef(boxOpacity);
+  boxOpacityRef.current = boxOpacity;
+  const boxRenderModeRef = useRef(boxRenderMode);
+  boxRenderModeRef.current = boxRenderMode;
   const manualRef = useRef<Record<BoxKey, ManualTransform>>(createManualMap());
   /** 매 프레임 updateMeshes가 기록하는 기저 변환 */
   const baseTransformsRef = useRef<Partial<Record<BoxKey, BaseTransform>>>({});
@@ -237,6 +268,44 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
       gizmoModeSetterRef.current?.(mode);
     },
     resetScaleForKey: (key: BoxKey) => {
+      manualRef.current[key].scaleVec.set(1, 1, 1);
+    },
+    absorbScale: (key: BoxKey, sx: number, sy: number) => {
+      const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+      switch (key) {
+        case "rib":
+          ribcageScaleRef.current = clamp(ribcageScaleRef.current * sx, 0.7, 1.5);
+          ribHeightScaleRef.current = clamp(ribHeightScaleRef.current * sy, 0.6, 1.6);
+          break;
+        case "waist":
+          waistScaleRef.current = clamp(waistScaleRef.current * sx, 0.7, 1.5);
+          waistHeightScaleRef.current = clamp(waistHeightScaleRef.current * sy, 0.6, 1.6);
+          break;
+        case "pelvis":
+          pelvisScaleRef.current = clamp(pelvisScaleRef.current * sx, 0.7, 1.5);
+          pelvisHeightScaleRef.current = clamp(pelvisHeightScaleRef.current * sy, 0.6, 1.6);
+          break;
+        case "head":
+          headScaleRef.current = clamp(headScaleRef.current * sx, 0.5, 2.0);
+          headHeightScaleRef.current = clamp(headHeightScaleRef.current * sy, 0.5, 2.0);
+          break;
+        case "leftUpperArm":
+        case "rightUpperArm":
+          upperArmThicknessRef.current = clamp(upperArmThicknessRef.current * sx, 0.5, 1.4);
+          break;
+        case "leftLowerArm":
+        case "rightLowerArm":
+          lowerArmThicknessRef.current = clamp(lowerArmThicknessRef.current * sx, 0.5, 1.4);
+          break;
+        case "leftThigh":
+        case "rightThigh":
+          thighThicknessRef.current = clamp(thighThicknessRef.current * sx, 0.5, 1.4);
+          break;
+        case "leftCalf":
+        case "rightCalf":
+          calfThicknessRef.current = clamp(calfThicknessRef.current * sx, 0.5, 1.4);
+          break;
+      }
       manualRef.current[key].scaleVec.set(1, 1, 1);
     },
   }));
@@ -285,7 +354,18 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
           runningMode: "IMAGE",
         });
 
-        const result = poseLandmarker.detect(img);
+        // HTMLImageElement 대신 Canvas로 감싸서 전달 →
+        // MediaPipe가 정확한 이미지 크기(naturalWidth×naturalHeight)를 인식하여
+        // "Using NORM_RECT without IMAGE_DIMENSIONS" 경고 및 비정사각형 좌표 오류 해소
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const result = poseLandmarker.detect(canvas);
+        poseLandmarker.close();
+
         if (result.landmarks && result.landmarks[0]) {
           const pts = result.landmarks[0].map((l) => ({
             x: clamp01(l.x),
@@ -484,14 +564,14 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
         new THREE.MeshBasicMaterial({
           color: faceColor,
           transparent: true,
-          opacity: boxOpacity,
+          opacity: boxOpacityRef.current,
           side: THREE.DoubleSide,
         })
       );
 
       const edges = new THREE.LineSegments(
         new THREE.EdgesGeometry(geometry),
-        new THREE.LineBasicMaterial({ color: edgeColor, transparent: true, opacity: boxOpacity })
+        new THREE.LineBasicMaterial({ color: edgeColor, transparent: true, opacity: boxOpacityRef.current })
       );
       mesh.add(edges);
 
@@ -502,7 +582,7 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
             new THREE.Vector3(0, 0.5, 0.501),
             new THREE.Vector3(0, -0.5, 0.501),
           ]),
-          new THREE.LineBasicMaterial({ color: edgeColor, transparent: true, opacity: boxOpacity })
+          new THREE.LineBasicMaterial({ color: edgeColor, transparent: true, opacity: boxOpacityRef.current })
         );
         mesh.add(midline);
       }
@@ -514,7 +594,7 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
             new THREE.Vector3(0.5, 0.5, 0.5),
             new THREE.Vector3(0.5, -0.5, -0.5),
           ]),
-          new THREE.LineBasicMaterial({ color: edgeColor, transparent: true, opacity: boxOpacity })
+          new THREE.LineBasicMaterial({ color: edgeColor, transparent: true, opacity: boxOpacityRef.current })
         );
         mesh.add(sideDiagonal);
       }
@@ -544,7 +624,7 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
     const createJointSphere = (color: number) => {
       const sphere = new THREE.Mesh(
         new THREE.SphereGeometry(1, 16, 16),
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: boxOpacity })
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: boxOpacityRef.current })
       );
       scene.add(sphere);
       return sphere;
@@ -570,13 +650,13 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
 
     // ── 렌더 모드 적용 ────────────────────────────────────────────────────
     const applyRenderMode = (currentSelectedKey: BoxKey | null) => {
-      const isOff = boxRenderMode === "off";
-      const wire = boxRenderMode === "wire";
+      const isOff = boxRenderModeRef.current === "off";
+      const wire = boxRenderModeRef.current === "wire";
 
       for (const box of getAllBoxes()) {
         box.mesh.visible = !isOff && !hiddenKeysRef.current.has(box.key) && validLandmarkKeysRef.current.has(box.key);
         const boxMat = box.mesh.material as THREE.MeshBasicMaterial;
-        boxMat.opacity = wire ? Math.min(0.35, boxOpacity * 0.45) : Math.min(0.75, boxOpacity);
+        boxMat.opacity = wire ? Math.min(0.35, boxOpacityRef.current * 0.45) : Math.min(0.75, boxOpacityRef.current);
         boxMat.color.setHex(box.faceColor);
         boxMat.needsUpdate = true;
 
@@ -588,7 +668,7 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
           part.visible = lineVisible;
           const lineMat = part.material as THREE.LineBasicMaterial;
           lineMat.color.setHex(currentSelectedKey === box.key ? 0xff2d2d : box.edgeColor);
-          lineMat.opacity = boxOpacity;
+          lineMat.opacity = boxOpacityRef.current;
           lineMat.needsUpdate = true;
         }
       }
@@ -597,7 +677,7 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
         mesh.visible = !isOff;
         const m = mesh.material as THREE.MeshBasicMaterial;
         m.color.setHex(0xffe45e);
-        m.opacity = Math.min(1, boxOpacity + 0.1);
+        m.opacity = Math.min(1, boxOpacityRef.current + 0.1);
         m.wireframe = false;
         m.needsUpdate = true;
       }
@@ -674,9 +754,9 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
         const nosePos2 = toWorld2D(nose);
         const shoulderWidthH = pLS2h.distanceTo(pRS2h);
         const baseHeadW = Math.min(shoulderWidthH * 0.30, worldWidth * 0.14);
-        const headW = Math.max(baseHeadW * headScale, worldWidth * 0.05);
+        const headW = Math.max(baseHeadW * headScaleRef.current, worldWidth * 0.05);
         const baseHeadH = Math.min(shoulderWidthH * 0.38, worldHeight * 0.16);
-        const headH = Math.max(baseHeadH * headHeightScale, worldHeight * 0.06);
+        const headH = Math.max(baseHeadH * headHeightScaleRef.current, worldHeight * 0.06);
         const headD = Math.min(shoulderWidthH * 0.28, worldWidth * 0.12);
         const rawLateralH = pRS3h.clone().sub(pLS3h);
         const headUpAxis = new THREE.Vector3(0, 1, 0);
@@ -687,7 +767,7 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
           new THREE.Matrix4().makeBasis(headLateralAxis, headUpAxis, headForwardAxis)
         );
         const headCenter = nosePos2.clone().add(new THREE.Vector3(0, headH * 0.1, 0));
-        bundle.torso.head.mesh.visible = boxRenderMode !== "off";
+        bundle.torso.head.mesh.visible = boxRenderModeRef.current !== "off";
         validLandmarkKeysRef.current.add("head");
         const headManual = manualRef.current["head"];
         baseTransformsRef.current["head"] = { position: headCenter.clone(), quaternion: headQuat.clone(), scale: new THREE.Vector3(headW, headH, headD) };
@@ -768,21 +848,21 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
         );
       };
 
-      const ribHeight = Math.max(torsoLength * 0.4, worldHeight * 0.11) * ribHeightScale;
+      const ribHeight = Math.max(torsoLength * 0.4, worldHeight * 0.11) * ribHeightScaleRef.current;
       const ribShoulderLift = torsoLength * 0.08;
       const ribCenter = shoulderMid2.clone().add(torsoUp2.clone().multiplyScalar(ribShoulderLift - ribHeight * 0.5));
-      const ribDepth = Math.max(shoulderWidth * boxThickness * 1.35, worldWidth * 0.055);
+      const ribDepth = Math.max(shoulderWidth * boxThicknessRef.current * 1.35, worldWidth * 0.055);
       applyTorsoBox(
         bundle.torso.rib,
         ribCenter, ribRotation,
-        Math.max(shoulderWidth * ribcageScale, worldWidth * 0.08),
+        Math.max(shoulderWidth * ribcageScaleRef.current, worldWidth * 0.08),
         ribHeight, ribDepth
       );
 
-      const waistHeight = Math.max(torsoLength * 0.25, worldHeight * 0.09) * waistHeightScale;
+      const waistHeight = Math.max(torsoLength * 0.25, worldHeight * 0.09) * waistHeightScaleRef.current;
       const waistCenter = shoulderMid2.clone().lerp(hipMid2, 0.56);
       const waistWidth = shoulderWidth * 0.72 + hipWidth * 0.28;
-      const waistDepth = Math.max(((shoulderWidth + hipWidth) * 0.5) * boxThickness * 1.12, worldWidth * 0.045);
+      const waistDepth = Math.max(((shoulderWidth + hipWidth) * 0.5) * boxThicknessRef.current * 1.12, worldWidth * 0.045);
       const waistYaw = shoulderYaw * 0.45 + hipYaw * 0.55;
       const waistRotation = torsoBaseRotation
         .clone()
@@ -790,23 +870,23 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
       applyTorsoBox(
         bundle.torso.waist,
         waistCenter, waistRotation,
-        Math.max(waistWidth * waistScale, worldWidth * 0.07),
+        Math.max(waistWidth * waistScaleRef.current, worldWidth * 0.07),
         waistHeight, waistDepth
       );
 
-      const pelvisHeight = Math.max(torsoLength * 0.33, worldHeight * 0.12) * pelvisHeightScale;
+      const pelvisHeight = Math.max(torsoLength * 0.33, worldHeight * 0.12) * pelvisHeightScaleRef.current;
       const pelvisCenter = hipMid2.clone().add(torsoUp2.clone().multiplyScalar(pelvisHeight * 0.5));
-      const pelvisDepth = Math.max(hipWidth * boxThickness * 1.7, worldWidth * 0.065);
+      const pelvisDepth = Math.max(hipWidth * boxThicknessRef.current * 1.7, worldWidth * 0.065);
       applyTorsoBox(
         bundle.torso.pelvis,
         pelvisCenter, pelvisRotation,
-        Math.max(hipWidth * pelvisScale, worldWidth * 0.08),
+        Math.max(hipWidth * pelvisScaleRef.current, worldWidth * 0.08),
         pelvisHeight, pelvisDepth
       );
 
       // ── 팔다리 실린더 ─────────────────────────────────────────────────
       const limbBaseThickness =
-        Math.max(((shoulderWidth + hipWidth) / 2) * boxThickness * 0.5, worldWidth * 0.015);
+        Math.max(((shoulderWidth + hipWidth) / 2) * boxThicknessRef.current * 0.5, worldWidth * 0.015);
 
       const setLimbByLookAt = (
         box: BoxVisual,
@@ -844,7 +924,7 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
           quaternion: baseQuat.clone(),
           scale: new THREE.Vector3(thick, length, thick),
         };
-        box.mesh.visible = boxRenderMode !== "off";
+        box.mesh.visible = boxRenderModeRef.current !== "off";
         validLandmarkKeysRef.current.add(box.key);
 
         if (isDraggingRef.current && currentSelectedKey === box.key) {
@@ -860,19 +940,19 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
         );
       };
 
-      setLimbByLookAt(bundle.limbs.leftUpperArm, LEFT_SHOULDER, LEFT_ELBOW, upperArmThickness);
-      setLimbByLookAt(bundle.limbs.rightUpperArm, RIGHT_SHOULDER, RIGHT_ELBOW, upperArmThickness);
-      setLimbByLookAt(bundle.limbs.leftLowerArm, LEFT_ELBOW, LEFT_WRIST, lowerArmThickness);
-      setLimbByLookAt(bundle.limbs.rightLowerArm, RIGHT_ELBOW, RIGHT_WRIST, lowerArmThickness);
-      setLimbByLookAt(bundle.limbs.leftThigh, LEFT_HIP, LEFT_KNEE, thighThickness);
-      setLimbByLookAt(bundle.limbs.rightThigh, RIGHT_HIP, RIGHT_KNEE, thighThickness);
-      setLimbByLookAt(bundle.limbs.leftCalf, LEFT_KNEE, LEFT_ANKLE, calfThickness);
-      setLimbByLookAt(bundle.limbs.rightCalf, RIGHT_KNEE, RIGHT_ANKLE, calfThickness);
+      setLimbByLookAt(bundle.limbs.leftUpperArm, LEFT_SHOULDER, LEFT_ELBOW, upperArmThicknessRef.current);
+      setLimbByLookAt(bundle.limbs.rightUpperArm, RIGHT_SHOULDER, RIGHT_ELBOW, upperArmThicknessRef.current);
+      setLimbByLookAt(bundle.limbs.leftLowerArm, LEFT_ELBOW, LEFT_WRIST, lowerArmThicknessRef.current);
+      setLimbByLookAt(bundle.limbs.rightLowerArm, RIGHT_ELBOW, RIGHT_WRIST, lowerArmThicknessRef.current);
+      setLimbByLookAt(bundle.limbs.leftThigh, LEFT_HIP, LEFT_KNEE, thighThicknessRef.current);
+      setLimbByLookAt(bundle.limbs.rightThigh, RIGHT_HIP, RIGHT_KNEE, thighThicknessRef.current);
+      setLimbByLookAt(bundle.limbs.leftCalf, LEFT_KNEE, LEFT_ANKLE, calfThicknessRef.current);
+      setLimbByLookAt(bundle.limbs.rightCalf, RIGHT_KNEE, RIGHT_ANKLE, calfThicknessRef.current);
 
       const setJointSphere = (mesh: THREE.Mesh, idx: number) => {
         const p = pts[idx];
         if (!p || !valid(p)) { mesh.visible = false; return; }
-        mesh.visible = boxRenderMode !== "off";
+        mesh.visible = boxRenderModeRef.current !== "off";
         mesh.position.copy(toWorld2D(p));
         const r = Math.max(limbBaseThickness * 0.45, worldWidth * 0.006);
         mesh.scale.setScalar(r);
@@ -964,22 +1044,8 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
     };
   }, [
     showThree,
-    boxOpacity,
-    boxRenderMode,
-    ribcageScale,
-    ribHeightScale,
-    waistScale,
-    waistHeightScale,
-    pelvisScale,
-    pelvisHeightScale,
-    headScale,
-    headHeightScale,
-    boxThickness,
-    upperArmThickness,
-    lowerArmThickness,
-    thighThickness,
-    calfThickness,
     onBoxUpdate,
+    onBoxChange,
   ]);
 
   // ── JSX ──────────────────────────────────────────────────────────────────
