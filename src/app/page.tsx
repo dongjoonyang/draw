@@ -77,6 +77,8 @@ export default function Home() {
   const [detectionFailed, setDetectionFailed] = useState(false);
   const [failedPhotoIds, setFailedPhotoIds] = useState<Set<string>>(new Set());
   const loaderRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const savedScrollRef = useRef(0);
   const fetchingRef = useRef(false);
   const pageRef = useRef(1);
   const [guideMode, setGuideMode] = useState<GuideMode>("none");
@@ -204,6 +206,7 @@ export default function Home() {
   };
 
   const handleSelectPhoto = (photo: UnsplashPhoto) => {
+    savedScrollRef.current = scrollContainerRef.current?.scrollTop ?? 0;
     history.pushState({ photo }, "");
     setSelectedPhoto(photo);
     setGuideMode("none");
@@ -215,6 +218,12 @@ export default function Home() {
     setTimeout(() => setShowHint(false), 3000);
   };
 
+  const restoreScroll = () => {
+    requestAnimationFrame(() => {
+      scrollContainerRef.current?.scrollTo({ top: savedScrollRef.current });
+    });
+  };
+
   const handleBack = () => {
     if (detectionFailed && selectedPhoto) {
       setFailedPhotoIds((prev) => new Set([...prev, selectedPhoto.id]));
@@ -222,6 +231,7 @@ export default function Home() {
     setDetectionFailed(false);
     setSelectedPhoto(null);
     setGuideMode("none");
+    restoreScroll();
   };
 
   useEffect(() => {
@@ -233,13 +243,18 @@ export default function Home() {
         setPracticeZoom(1);
         setPanOffset({ x: 0, y: 0 });
       } else {
+        if (detectionFailed && selectedPhoto) {
+          setFailedPhotoIds((prev) => new Set([...prev, selectedPhoto.id]));
+        }
+        setDetectionFailed(false);
         setSelectedPhoto(null);
         setGuideMode("none");
+        restoreScroll();
       }
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  }, [detectionFailed, selectedPhoto]);
 
   useEffect(() => {
     if (!selectedPhoto) return;
@@ -547,7 +562,7 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-6 py-6">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-6 py-6">
         {loading && (
           <div className="flex h-full items-center justify-center">
             <p className="text-sm text-ink/40">사진 불러오는 중…</p>
