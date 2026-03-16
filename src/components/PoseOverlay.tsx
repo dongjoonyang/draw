@@ -51,6 +51,8 @@ type Props = {
   onGizmoModeChange?: (mode: GizmoMode) => void;
   /** 키보드 단축키 또는 액션 발생 시 부모에게 전달 ("translate"|"rotate"|"scale"|"delete"|"reset") */
   onAction?: (key: string) => void;
+  /** 잠긴 박스 키 집합 — 잠긴 박스는 클릭 선택 불가 */
+  lockedKeys?: Set<BoxKey>;
 };
 
 export type PoseOverlayHandle = {
@@ -61,6 +63,7 @@ export type PoseOverlayHandle = {
   absorbScale: (key: BoxKey, sx: number, sy: number) => void;
   setRotationForKey: (key: BoxKey, degX: number, degY: number, degZ: number) => void;
   setScaleForKey: (key: BoxKey, x: number, y: number, z: number) => void;
+  deselect: () => void;
 };
 
 // ── Pose landmark indices ────────────────────────────────────────────────────
@@ -189,6 +192,7 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
   onGizmoModeChange,
   onAction,
   zoom = 1,
+  lockedKeys,
 }: Props, ref) {
   const skeletonCanvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -203,10 +207,13 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
   const bundleRef = useRef<SceneBundle | null>(null);
   const isDraggingRef = useRef(false);
   const hiddenKeysRef = useRef<Set<BoxKey>>(new Set());
+  const lockedKeysRef = useRef<Set<BoxKey>>(new Set());
+  lockedKeysRef.current = lockedKeys ?? new Set();
   const validLandmarkKeysRef = useRef<Set<BoxKey>>(new Set());
   const currentSelectedKeyRef = useRef<BoxKey | null>(null);
   const triggerDeleteRef = useRef<((key: BoxKey) => void) | null>(null);
   const triggerResetHiddenRef = useRef<(() => void) | null>(null);
+  const deselectRef = useRef<(() => void) | null>(null);
   const rafRef = useRef<number | null>(null);
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
@@ -317,6 +324,9 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
     },
     setScaleForKey: (key: BoxKey, x: number, y: number, z: number) => {
       manualRef.current[key].scaleVec.set(x, y, z);
+    },
+    deselect: () => {
+      deselectRef.current?.();
     },
   }));
   const onActionRef = useRef(onAction);
@@ -677,7 +687,11 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
         for (const part of lineParts) {
           part.visible = lineVisible;
           const lineMat = part.material as THREE.LineBasicMaterial;
-          lineMat.color.setHex(currentSelectedKey === box.key ? 0xff2d2d : box.edgeColor);
+          lineMat.color.setHex(
+            currentSelectedKey === box.key ? 0xff2d2d
+            : lockedKeysRef.current.has(box.key) ? 0x4499ff
+            : box.edgeColor
+          );
           lineMat.opacity = boxOpacityRef.current;
           lineMat.needsUpdate = true;
         }
@@ -992,7 +1006,9 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
       isDraggingRef,
       flashRef: flashSetterRef,
       hiddenKeysRef,
+      lockedKeysRef,
       currentSelectedKeyRef,
+      deselectRef,
     });
 
     gizmoModeSetterRef.current = (mode: GizmoMode) => {
@@ -1130,7 +1146,9 @@ type GizmoControllerParams = {
   isDraggingRef: React.MutableRefObject<boolean>;
   flashRef: React.MutableRefObject<((key: string) => void) | null>;
   hiddenKeysRef: React.MutableRefObject<Set<BoxKey>>;
+  lockedKeysRef: React.MutableRefObject<Set<BoxKey>>;
   currentSelectedKeyRef: React.MutableRefObject<BoxKey | null>;
+  deselectRef: React.MutableRefObject<(() => void) | null>;
 };
 
 function setupGizmoController({
@@ -1148,7 +1166,9 @@ function setupGizmoController({
   isDraggingRef,
   flashRef,
   hiddenKeysRef,
+  lockedKeysRef,
   currentSelectedKeyRef,
+  deselectRef,
 }: GizmoControllerParams): { controls: TransformControls; destroy: () => void } {
   const tc = new TransformControls(camera, renderer.domElement);
   tc.setSize(0.8);
@@ -1281,6 +1301,9 @@ function setupGizmoController({
     const picked = boxes.find((b) => b.mesh === hits[0].object);
     if (!picked) return;
 
+    // 잠긴 박스는 선택 불가
+    if (lockedKeysRef.current.has(picked.key)) return;
+
     if (picked.key !== selectedKey) {
       selectedKey = picked.key;
       const tcAny = tc as unknown as { _poseOverlaySelectedRef?: { current: BoxKey | null } };
@@ -1290,6 +1313,14 @@ function setupGizmoController({
       tc.attach(picked.mesh);
       onSelectChange(selectedKey);
     }
+  };
+
+  // deselect 핸들러 등록
+  deselectRef.current = () => {
+    selectedKey = null;
+    currentSelectedKeyRef.current = null;
+    tc.detach();
+    onSelectChange(null);
   };
 
 

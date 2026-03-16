@@ -52,6 +52,7 @@ export default function Home() {
   const [isPanning, setIsPanning] = useState(false);
   const [showHint, setShowHint] = useState(false);
   const isSpaceRef = useRef(false);
+  const isMidButtonRef = useRef(false);
   const isPanningRef = useRef(false);
   const panStartRef = useRef({ x: 0, y: 0 });
   const panBaseRef = useRef({ x: 0, y: 0 });
@@ -72,6 +73,7 @@ export default function Home() {
   const [rotEdit, setRotEdit] = useState({ x: "0.0", y: "0.0", z: "0.0" });
   const [scaleEdit, setScaleEdit] = useState({ x: "1.00", y: "1.00", z: "1.00" });
   const inputFocused = useRef(new Set<string>());
+  const [lockedKeys, setLockedKeys] = useState<Set<BoxKey>>(new Set());
 
   const fetchPhotos = useCallback(async (pageNum: number) => {
     if (fetchingRef.current) return;
@@ -164,6 +166,22 @@ export default function Home() {
     setLiveBoxInfo(info);
   }, []);
 
+  const handleToggleLock = useCallback((key: BoxKey) => {
+    setLockedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+        // 잠글 때 해당 박스가 선택된 상태면 선택 해제
+        if (selectedBoxKey === key) {
+          poseOverlayRef.current?.deselect();
+        }
+      }
+      return next;
+    });
+  }, [selectedBoxKey]);
+
   // selectedBoxKey 변경 시 입력값 초기화
   useEffect(() => {
     setRotEdit({ x: "0.0", y: "0.0", z: "0.0" });
@@ -242,6 +260,19 @@ export default function Home() {
         isSpaceRef.current = true;
         setIsSpaceHeld(true);
       }
+      if (e.code === "KeyL" && !e.repeat && !(e.target instanceof HTMLInputElement)) {
+        setSelectedBoxKey((key) => {
+          if (key) {
+            setLockedKeys((prev) => {
+              const next = new Set(prev);
+              if (next.has(key)) { next.delete(key); }
+              else { next.add(key); poseOverlayRef.current?.deselect(); }
+              return next;
+            });
+          }
+          return key;
+        });
+      }
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === "Space") {
@@ -251,7 +282,8 @@ export default function Home() {
         setIsPanning(false);
       }
     };
-    const onMouseUp = () => {
+    const onMouseUp = (e: MouseEvent) => {
+      if (e.button === 1) isMidButtonRef.current = false;
       if (isPanningRef.current) {
         isPanningRef.current = false;
         setIsPanning(false);
@@ -352,8 +384,9 @@ export default function Home() {
               setPracticeZoom((prev) => Math.min(4, Math.max(0.3, prev - e.deltaY * 0.001)));
             }}
             onMouseDown={(e) => {
-              if (isSpaceRef.current) {
-                e.preventDefault();
+              if (e.button === 1) e.preventDefault();
+              if (isSpaceRef.current || e.button === 1) {
+                isMidButtonRef.current = e.button === 1;
                 isPanningRef.current = true;
                 setIsPanning(true);
                 panStartRef.current = { x: e.clientX, y: e.clientY };
@@ -375,7 +408,7 @@ export default function Home() {
               style={{ transition: "opacity 0.8s ease", opacity: showHint ? 1 : 0 }}
             >
               <div className="mb-0.5 font-medium">캔버스 조작</div>
-              <div className="text-white/60">Space + 드래그 · 이동 &nbsp;·&nbsp; 휠 · 줌 인/아웃</div>
+              <div className="text-white/60">Space + 드래그 · 이동 &nbsp;·&nbsp; 휠클릭 + 드래그 · 이동 &nbsp;·&nbsp; 휠 · 줌</div>
             </div>
             <div className="absolute right-2 top-2 z-10 flex flex-col items-end gap-2">
               {/* 줌 버튼 */}
@@ -439,6 +472,16 @@ export default function Home() {
                     </button>
                   )}
 
+                  {selectedBoxKey && (
+                    <button
+                      onPointerDown={() => handleToggleLock(selectedBoxKey)}
+                      className="flex items-center justify-between rounded bg-blue-500/80 px-2.5 py-1.5 text-[11px] text-white hover:bg-blue-500 select-none transition-all duration-75"
+                    >
+                      <span>{lockedKeys.has(selectedBoxKey) ? "잠금해제" : "잠금"}</span>
+                      <span className="rounded bg-white/20 px-1 py-0.5 text-[9px] leading-none opacity-70">L</span>
+                    </button>
+                  )}
+
                   <button
                     onPointerDown={() => {
                       poseOverlayRef.current?.resetHidden();
@@ -460,6 +503,7 @@ export default function Home() {
               enable3DBox={true}
               boxRenderMode={boxRenderMode}
               boxOpacity={boxOpacity}
+              lockedKeys={lockedKeys}
               onBoxChange={handleBoxChange}
               onSelectedKeyChange={(key) => { setSelectedBoxKey(key); if (!key) setLiveBoxInfo(null); }}
               onGizmoModeChange={setGizmoMode}
@@ -622,6 +666,34 @@ export default function Home() {
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* 잠긴 박스 목록 */}
+            {guideMode === "box" && lockedKeys.size > 0 && (
+              <div className="border-t border-ink/[0.06] p-4">
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-blue-400/70">잠긴 박스 {lockedKeys.size}개</p>
+                  <button
+                    onClick={() => setLockedKeys(new Set())}
+                    className="text-[10px] text-ink/30 hover:text-ink/60"
+                  >
+                    전체 해제
+                  </button>
+                </div>
+                <div className="flex flex-col gap-1">
+                  {Array.from(lockedKeys).map((key) => (
+                    <div key={key} className="flex items-center justify-between rounded bg-blue-500/10 px-2.5 py-1.5">
+                      <span className="text-[11px] text-blue-400/80">{BOX_KEY_LABEL[key] ?? key}</span>
+                      <button
+                        onClick={() => handleToggleLock(key)}
+                        className="text-[10px] text-ink/30 hover:text-blue-400"
+                      >
+                        해제
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
