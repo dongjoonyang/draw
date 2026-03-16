@@ -59,6 +59,8 @@ export type PoseOverlayHandle = {
   setGizmoMode: (mode: GizmoMode) => void;
   resetScaleForKey: (key: BoxKey) => void;
   absorbScale: (key: BoxKey, sx: number, sy: number) => void;
+  setRotationForKey: (key: BoxKey, degX: number, degY: number, degZ: number) => void;
+  setScaleForKey: (key: BoxKey, x: number, y: number, z: number) => void;
 };
 
 // ── Pose landmark indices ────────────────────────────────────────────────────
@@ -307,6 +309,14 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
           break;
       }
       manualRef.current[key].scaleVec.set(1, 1, 1);
+    },
+    setRotationForKey: (key: BoxKey, degX: number, degY: number, degZ: number) => {
+      const d2r = Math.PI / 180;
+      const euler = new THREE.Euler(degX * d2r, degY * d2r, degZ * d2r, "XYZ");
+      manualRef.current[key].rotationOffset.setFromEuler(euler);
+    },
+    setScaleForKey: (key: BoxKey, x: number, y: number, z: number) => {
+      manualRef.current[key].scaleVec.set(x, y, z);
     },
   }));
   const onActionRef = useRef(onAction);

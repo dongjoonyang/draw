@@ -69,6 +69,9 @@ export default function Home() {
   const [boxRenderMode, setBoxRenderMode] = useState<BoxRenderMode>("wire");
   const [boxOpacity, setBoxOpacity] = useState(0.85);
   const [selectedBoxKey, setSelectedBoxKey] = useState<BoxKey | null>(null);
+  const [rotEdit, setRotEdit] = useState({ x: "0.0", y: "0.0", z: "0.0" });
+  const [scaleEdit, setScaleEdit] = useState({ x: "1.00", y: "1.00", z: "1.00" });
+  const inputFocused = useRef(new Set<string>());
 
   const fetchPhotos = useCallback(async (pageNum: number) => {
     if (fetchingRef.current) return;
@@ -160,6 +163,25 @@ export default function Home() {
   const handleBoxChange = useCallback((info: BoxUpdateInfo) => {
     setLiveBoxInfo(info);
   }, []);
+
+  // selectedBoxKey 변경 시 입력값 초기화
+  useEffect(() => {
+    setRotEdit({ x: "0.0", y: "0.0", z: "0.0" });
+    setScaleEdit({ x: "1.00", y: "1.00", z: "1.00" });
+  }, [selectedBoxKey]);
+
+  // 드래그 중 실시간 동기화 (포커스된 필드는 제외)
+  useEffect(() => {
+    if (!liveBoxInfo || liveBoxInfo.key !== selectedBoxKey) return;
+    const r = liveBoxInfo.rotEulerDeg;
+    const sv = liveBoxInfo.scaleVec as unknown as Record<string, number>;
+    if (!inputFocused.current.has("rx")) setRotEdit(p => ({ ...p, x: r.x.toFixed(1) }));
+    if (!inputFocused.current.has("ry")) setRotEdit(p => ({ ...p, y: r.y.toFixed(1) }));
+    if (!inputFocused.current.has("rz")) setRotEdit(p => ({ ...p, z: r.z.toFixed(1) }));
+    if (!inputFocused.current.has("sx")) setScaleEdit(p => ({ ...p, x: sv["x"].toFixed(2) }));
+    if (!inputFocused.current.has("sy")) setScaleEdit(p => ({ ...p, y: sv["y"].toFixed(2) }));
+    if (!inputFocused.current.has("sz")) setScaleEdit(p => ({ ...p, z: sv["z"].toFixed(2) }));
+  }, [liveBoxInfo, selectedBoxKey]);
 
   const handleSelectPhoto = (photo: UnsplashPhoto) => {
     savedScrollRef.current = scrollContainerRef.current?.scrollTop ?? 0;
@@ -535,15 +557,30 @@ export default function Home() {
                     {gizmoMode === "rotate" && (
                       <div className="grid grid-cols-3 gap-1.5">
                         {(["x", "y", "z"] as const).map((axis) => {
-                          const val = liveBoxInfo?.key === selectedBoxKey
-                            ? liveBoxInfo.rotEulerDeg[axis]
-                            : 0;
+                          const fid = `r${axis}`;
                           return (
-                            <div key={axis} className="flex flex-col items-center rounded bg-ink/[0.06] py-1.5">
-                              <span className="text-[9px] uppercase text-ink/30">{axis}</span>
-                              <span className="mt-0.5 text-[12px] font-mono font-semibold tabular-nums text-ink/70">
-                                {val.toFixed(1)}°
-                              </span>
+                            <div key={axis} className="flex flex-col items-center rounded bg-ink/[0.06] py-1.5 px-1">
+                              <span className="text-[9px] uppercase text-ink/30">{axis} °</span>
+                              <input
+                                type="number"
+                                step={0.1}
+                                value={rotEdit[axis]}
+                                onFocus={() => inputFocused.current.add(fid)}
+                                onBlur={() => inputFocused.current.delete(fid)}
+                                onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                                onChange={(e) => {
+                                  const str = e.target.value;
+                                  setRotEdit(p => ({ ...p, [axis]: str }));
+                                  const v = parseFloat(str);
+                                  if (!isNaN(v) && selectedBoxKey) {
+                                    const rx = axis === "x" ? v : parseFloat(rotEdit.x);
+                                    const ry = axis === "y" ? v : parseFloat(rotEdit.y);
+                                    const rz = axis === "z" ? v : parseFloat(rotEdit.z);
+                                    poseOverlayRef.current?.setRotationForKey(selectedBoxKey, rx, ry, rz);
+                                  }
+                                }}
+                                className="mt-0.5 w-full bg-transparent text-center text-[11px] font-mono font-semibold text-ink/70 focus:outline-none focus:ring-1 focus:ring-accent/40 rounded [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                              />
                             </div>
                           );
                         })}
@@ -552,16 +589,32 @@ export default function Home() {
                     {gizmoMode === "scale" && (
                       <div className="grid grid-cols-3 gap-1.5">
                         {(["x", "y", "z"] as const).map((axis) => {
-                          const sv = liveBoxInfo?.key === selectedBoxKey ? liveBoxInfo.scaleVec : null;
-                          const val = sv ? (sv as unknown as Record<string, number>)[axis] : 1;
+                          const fid = `s${axis}`;
+                          const label = axis === "y" ? "높이" : axis === "x" ? "너비" : "깊이";
                           return (
-                            <div key={axis} className="flex flex-col items-center rounded bg-ink/[0.06] py-1.5">
-                              <span className="text-[9px] uppercase text-ink/30">
-                                {axis === "y" ? "높이" : axis === "x" ? "너비" : "깊이"}
-                              </span>
-                              <span className="mt-0.5 text-[12px] font-mono font-semibold tabular-nums text-ink/70">
-                                {val.toFixed(2)}×
-                              </span>
+                            <div key={axis} className="flex flex-col items-center rounded bg-ink/[0.06] py-1.5 px-1">
+                              <span className="text-[9px] uppercase text-ink/30">{label} ×</span>
+                              <input
+                                type="number"
+                                step={0.01}
+                                min={0.01}
+                                value={scaleEdit[axis]}
+                                onFocus={() => inputFocused.current.add(fid)}
+                                onBlur={() => inputFocused.current.delete(fid)}
+                                onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                                onChange={(e) => {
+                                  const str = e.target.value;
+                                  setScaleEdit(p => ({ ...p, [axis]: str }));
+                                  const v = parseFloat(str);
+                                  if (!isNaN(v) && v > 0 && selectedBoxKey) {
+                                    const sx = axis === "x" ? v : parseFloat(scaleEdit.x);
+                                    const sy = axis === "y" ? v : parseFloat(scaleEdit.y);
+                                    const sz = axis === "z" ? v : parseFloat(scaleEdit.z);
+                                    poseOverlayRef.current?.setScaleForKey(selectedBoxKey, sx, sy, sz);
+                                  }
+                                }}
+                                className="mt-0.5 w-full bg-transparent text-center text-[11px] font-mono font-semibold text-ink/70 focus:outline-none focus:ring-1 focus:ring-accent/40 rounded [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                              />
                             </div>
                           );
                         })}
