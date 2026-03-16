@@ -1184,9 +1184,11 @@ function setupGizmoController({
       // 팔다리(Limb)인 경우 너비(X)와 깊이(Z)를 동기화 (원통 유지)
       const isLimb = !["rib", "waist", "pelvis", "head"].includes(selectedKey);
       if (isLimb) {
-        // 1.0(기본값)에서 더 많이 변화한 축의 값을 따름
-        const devX = Math.abs(sx - 1);
-        const devZ = Math.abs(sz - 1);
+        // 이전 scaleVec 기준으로 이번 드래그에서 더 많이 변화한 축의 값을 따름
+        const prevSx = manual.scaleVec.x;
+        const prevSz = manual.scaleVec.z;
+        const devX = Math.abs(sx - prevSx);
+        const devZ = Math.abs(sz - prevSz);
         if (devX > devZ) {
           sz = sx;
         } else {
