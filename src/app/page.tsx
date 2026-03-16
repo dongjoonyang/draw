@@ -67,6 +67,7 @@ export default function Home() {
   }, []);
 
   const [boxRenderMode, setBoxRenderMode] = useState<BoxRenderMode>("wire");
+  const [boxOpacity, setBoxOpacity] = useState(0.85);
   const [selectedBoxKey, setSelectedBoxKey] = useState<BoxKey | null>(null);
 
   const fetchPhotos = useCallback(async (pageNum: number) => {
@@ -436,6 +437,7 @@ export default function Home() {
               guideMode={guideMode}
               enable3DBox={true}
               boxRenderMode={boxRenderMode}
+              boxOpacity={boxOpacity}
               onBoxChange={handleBoxChange}
               onSelectedKeyChange={(key) => { setSelectedBoxKey(key); if (!key) setLiveBoxInfo(null); }}
               onGizmoModeChange={setGizmoMode}
@@ -493,6 +495,34 @@ export default function Home() {
                         {label}
                       </button>
                     ))}
+                  </div>
+                </div>
+
+                {/* 박스 투명도 */}
+                <div className="mb-4">
+                  <p className="mb-2 text-[11px] text-ink/50">박스 투명도</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={boxOpacity}
+                      onChange={(e) => setBoxOpacity(Number(e.target.value))}
+                      className="h-1.5 flex-1 cursor-pointer accent-accent"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={boxOpacity}
+                      onChange={(e) => {
+                        const v = Math.min(1, Math.max(0, Number(e.target.value)));
+                        if (!isNaN(v)) setBoxOpacity(v);
+                      }}
+                      className="w-14 rounded-md border border-ink/10 bg-transparent px-1.5 py-1 text-center text-xs text-ink/70 focus:outline-none focus:ring-1 focus:ring-accent/50"
+                    />
                   </div>
                 </div>
 
