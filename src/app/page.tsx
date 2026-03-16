@@ -74,6 +74,8 @@ export default function Home() {
   const [scaleEdit, setScaleEdit] = useState({ x: "1.00", y: "1.00", z: "1.00" });
   const inputFocused = useRef(new Set<string>());
   const [lockedKeys, setLockedKeys] = useState<Set<BoxKey>>(new Set());
+  const [photoOpacity, setPhotoOpacity] = useState(1);
+  const [photoGrayscale, setPhotoGrayscale] = useState(false);
 
   const fetchPhotos = useCallback(async (pageNum: number) => {
     if (fetchingRef.current) return;
@@ -504,6 +506,8 @@ export default function Home() {
               boxRenderMode={boxRenderMode}
               boxOpacity={boxOpacity}
               lockedKeys={lockedKeys}
+              photoOpacity={photoOpacity}
+              photoGrayscale={photoGrayscale}
               onBoxChange={handleBoxChange}
               onSelectedKeyChange={(key) => { setSelectedBoxKey(key); if (!key) setLiveBoxInfo(null); }}
               onGizmoModeChange={setGizmoMode}
@@ -562,6 +566,45 @@ export default function Home() {
                       </button>
                     ))}
                   </div>
+                </div>
+
+                {/* 사진 설정 */}
+                <div className="mb-4">
+                  <p className="mb-2 text-[11px] text-ink/50">사진</p>
+                  <button
+                    onClick={() => setPhotoGrayscale((v) => !v)}
+                    className={`mb-2 w-full rounded-md py-1.5 text-xs font-medium transition-all ${
+                      photoGrayscale
+                        ? "bg-white text-accent shadow-sm"
+                        : "border border-ink/10 text-ink/50 hover:bg-ink/5"
+                    }`}
+                  >
+                    흑백
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={1}
+                      step={0.01}
+                      value={photoOpacity}
+                      onChange={(e) => setPhotoOpacity(Number(e.target.value))}
+                      className="h-1.5 flex-1 cursor-pointer accent-accent"
+                    />
+                    <input
+                      type="number"
+                      min={0.1}
+                      max={1}
+                      step={0.01}
+                      value={photoOpacity}
+                      onChange={(e) => {
+                        const v = Math.min(1, Math.max(0.1, Number(e.target.value)));
+                        if (!isNaN(v)) setPhotoOpacity(v);
+                      }}
+                      className="w-14 rounded-md border border-ink/10 bg-transparent px-1.5 py-1 text-center text-xs text-ink/70 focus:outline-none focus:ring-1 focus:ring-accent/50"
+                    />
+                  </div>
+                  <p className="mt-1.5 text-[10px] text-ink/30">권장 0.4 – 0.6</p>
                 </div>
 
                 {/* 박스 투명도 */}

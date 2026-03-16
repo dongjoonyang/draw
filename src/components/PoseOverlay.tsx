@@ -53,6 +53,10 @@ type Props = {
   onAction?: (key: string) => void;
   /** 잠긴 박스 키 집합 — 잠긴 박스는 클릭 선택 불가 */
   lockedKeys?: Set<BoxKey>;
+  /** 사진 불투명도 (0~1, 기본 1) */
+  photoOpacity?: number;
+  /** 사진 흑백 여부 */
+  photoGrayscale?: boolean;
 };
 
 export type PoseOverlayHandle = {
@@ -193,6 +197,8 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
   onAction,
   zoom = 1,
   lockedKeys,
+  photoOpacity = 1,
+  photoGrayscale = false,
 }: Props, ref) {
   const skeletonCanvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -1084,7 +1090,10 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
         src={imageSrc}
         alt="인체 드로잉 참조"
         className="max-h-[92vh] w-auto object-contain"
-        style={{ filter: "contrast(1.05)" }}
+        style={{
+          filter: `contrast(1.05)${photoGrayscale ? " grayscale(100%)" : ""}`,
+          opacity: photoOpacity,
+        }}
       />
 
       {showSkeleton && (
