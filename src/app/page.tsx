@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import PoseOverlay, { BoxKey, BoxUpdateInfo, GizmoMode, PoseOverlayHandle } from "@/components/PoseOverlay";
-import { getTodayRecord } from "@/lib/storage";
+import { getTodayRecord, savePracticeRecord, savePoseImage } from "@/lib/storage";
 
 type GuideMode = "none" | "skeleton" | "box";
 type BoxRenderMode = "off" | "wire" | "solid";
@@ -76,6 +76,15 @@ export default function Home() {
   const [lockedKeys, setLockedKeys] = useState<Set<BoxKey>>(new Set());
   const [photoOpacity, setPhotoOpacity] = useState(1);
   const [photoGrayscale, setPhotoGrayscale] = useState(false);
+  const boxModeStartRef = useRef<number | null>(null);  // 도형화 모드 시작 시각
+  const boxAccumSecRef = useRef(0);                     // 누적 초 (이전 세션 포함)
+  const [liveTimerSec, setLiveTimerSec] = useState(0);
+  const [todayCount, setTodayCount] = useState<number>(0);
+  const [toast, setToast] = useState(false);
+
+  useEffect(() => {
+    setTodayCount(getTodayRecord()?.poseCount ?? 0);
+  }, []);
 
   const fetchPhotos = useCallback(async (pageNum: number) => {
     if (fetchingRef.current) return;
@@ -151,6 +160,30 @@ export default function Home() {
     if (guideMode !== "box") setSelectedBoxKey(null);
   }, [guideMode]);
 
+  // 도형화 모드 진입 시 타이머 시작, 이탈 시 누적
+  useEffect(() => {
+    if (guideMode === "box") {
+      boxModeStartRef.current = Date.now();
+    } else {
+      if (boxModeStartRef.current !== null) {
+        boxAccumSecRef.current += Math.floor((Date.now() - boxModeStartRef.current) / 1000);
+        boxModeStartRef.current = null;
+      }
+    }
+  }, [guideMode]);
+
+  // 1초마다 화면 갱신
+  useEffect(() => {
+    if (guideMode !== "box") return;
+    const id = setInterval(() => {
+      const start = boxModeStartRef.current;
+      if (start !== null) {
+        setLiveTimerSec(boxAccumSecRef.current + Math.floor((Date.now() - start) / 1000));
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [guideMode]);
+
   useEffect(() => {
     if (gizmoMode === "translate") setLiveBoxInfo(null);
   }, [gizmoMode]);
@@ -214,6 +247,9 @@ export default function Home() {
     setPanOffset({ x: 0, y: 0 });
     setShowHint(true);
     setTimeout(() => setShowHint(false), 3000);
+    boxModeStartRef.current = null;
+    boxAccumSecRef.current = 0;
+    setLiveTimerSec(0);
   };
 
   const restoreScroll = () => {
@@ -229,8 +265,38 @@ export default function Home() {
     setDetectionFailed(false);
     setSelectedPhoto(null);
     setGuideMode("none");
+    boxModeStartRef.current = null;
+    boxAccumSecRef.current = 0;
+    setLiveTimerSec(0);
     restoreScroll();
   };
+
+  const handleSave = useCallback(async () => {
+    if (!selectedPhoto) return;
+    const today = new Date().toISOString().slice(0, 10);
+    // 현재 세션 누적 포함 총 초
+    const currentSec = boxModeStartRef.current !== null
+      ? boxAccumSecRef.current + Math.floor((Date.now() - boxModeStartRef.current) / 1000)
+      : boxAccumSecRef.current;
+    const elapsed = Math.floor(currentSec / 60);
+    const capturedUrl = await poseOverlayRef.current?.captureImage() ?? selectedPhoto.urls.regular;
+    savePracticeRecord({ date: today, poseCount: 1, totalMinutes: elapsed });
+    savePoseImage({
+      id: `${Date.now()}`,
+      date: today,
+      imageUrl: capturedUrl,
+      guideMode,
+      authorName: selectedPhoto.user.name,
+      savedAt: new Date().toISOString(),
+    });
+    // 저장 후 타이머 리셋
+    boxAccumSecRef.current = 0;
+    if (boxModeStartRef.current !== null) boxModeStartRef.current = Date.now();
+    setLiveTimerSec(0);
+    setTodayCount((prev) => prev + 1);
+    setToast(true);
+    setTimeout(() => setToast(false), 2500);
+  }, [selectedPhoto, guideMode]);
 
   useEffect(() => {
     const onPopState = (e: PopStateEvent) => {
@@ -301,7 +367,16 @@ export default function Home() {
     };
   }, [selectedPhoto]);
 
-  const todayRecord = getTodayRecord();
+  const todayRecord = getTodayRecord(); // grid view에서만 사용
+
+  const formatTimer = (sec: number) => {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    const mm = m.toString().padStart(2, "0");
+    const ss = s.toString().padStart(2, "0");
+    return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+  };
 
   const guideTabs: { key: GuideMode; label: string }[] = [
     { key: "none", label: "기본 사진" },
@@ -329,32 +404,39 @@ export default function Home() {
               {guideTabs.map(({ key, label }) => {
                 const disabled = key === "box" && !landmarksReady;
                 return (
-                  <button
-                    key={key}
-                    disabled={disabled}
-                    onClick={() => {
-                      if (disabled) return;
-                      setGuideMode(key);
-                      if (key === "box" && boxRenderMode === "off") setBoxRenderMode("wire");
-                    }}
-                    className={`rounded-md px-4 py-1.5 text-xs font-medium transition-all ${
-                      guideMode === key
-                        ? "bg-white text-accent shadow-sm"
-                        : disabled
-                        ? "text-ink/25 cursor-not-allowed"
-                        : "text-ink/60 hover:text-ink hover:bg-ink/[0.06]"
-                    }`}
-                  >
-                    {label}
-                  </button>
+                  <div key={key} className="group relative">
+                    <button
+                      disabled={disabled}
+                      onClick={() => {
+                        if (disabled) return;
+                        setGuideMode(key);
+                        if (key === "box" && boxRenderMode === "off") setBoxRenderMode("wire");
+                      }}
+                      className={`rounded-md px-4 py-1.5 text-xs font-medium transition-all ${
+                        guideMode === key
+                          ? "bg-white text-accent shadow-sm"
+                          : disabled
+                          ? "text-ink/25 cursor-not-allowed"
+                          : "text-ink/60 hover:text-ink hover:bg-ink/[0.06]"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                    {disabled && (
+                      <div className="pointer-events-none absolute left-1/2 top-full z-50 mt-1.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-ink/80 px-2.5 py-1.5 text-[11px] text-white opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100">
+                        스켈레톤 클릭 후 사용 가능합니다
+                        <div className="absolute -top-1 left-1/2 -translate-x-1/2 border-4 border-transparent border-b-ink/80" />
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
           </div>
 
-          <div className="flex w-52 shrink-0 items-center justify-end gap-2">
+          <div className="flex shrink-0 items-center justify-end gap-2 whitespace-nowrap">
             <span className="text-[11px] text-ink/40">
-              오늘 {todayRecord?.poseCount ?? 0}회
+              오늘 {todayCount}회
             </span>
             <Link
               href="/dashboard"
@@ -362,6 +444,14 @@ export default function Home() {
             >
               대시보드
             </Link>
+            <a
+              href="https://ko-fi.com/drawdream"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 rounded-md bg-[#FF5E5B] px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90"
+            >
+              ☕ 커피 한 잔
+            </a>
           </div>
         </header>
 
@@ -493,6 +583,18 @@ export default function Home() {
                   >
                     <span>초기화</span>
                     <span className="rounded bg-white/20 px-1 py-0.5 text-[9px] leading-none opacity-70">Q</span>
+                  </button>
+
+                  <div className="flex flex-col items-center rounded bg-black/30 py-1.5 px-2 gap-0.5">
+                    <span className="text-[9px] uppercase tracking-widest text-white/40">TIME</span>
+                    <span className="font-mono text-sm font-bold tabular-nums text-white/90">{formatTimer(liveTimerSec)}</span>
+                  </div>
+
+                  <button
+                    onPointerDown={handleSave}
+                    className="flex items-center justify-center rounded bg-accent px-2.5 py-1.5 text-[11px] font-medium text-white shadow-sm shadow-accent/40 hover:opacity-90 select-none transition-all duration-75"
+                  >
+                    저장하기
                   </button>
                 </div>
               )}
@@ -751,6 +853,14 @@ export default function Home() {
             )}
           </aside>
         </div>
+
+        {/* 저장 토스트 */}
+        <div
+          className="pointer-events-none fixed bottom-8 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-ink/80 px-5 py-3 text-sm font-medium text-white shadow-xl backdrop-blur-sm transition-all duration-300"
+          style={{ opacity: toast ? 1 : 0, transform: `translateX(-50%) translateY(${toast ? "0px" : "12px"})` }}
+        >
+          저장되었습니다 ✓
+        </div>
       </main>
     );
   }
@@ -766,7 +876,7 @@ export default function Home() {
 
         <div className="flex items-center gap-3">
           <span className="text-[11px] text-ink/40">
-            오늘 {todayRecord?.poseCount ?? 0}회
+            오늘 {todayCount}회
           </span>
           <Link
             href="/dashboard"
@@ -774,6 +884,14 @@ export default function Home() {
           >
             대시보드
           </Link>
+          <a
+            href="https://ko-fi.com/drawdream"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 rounded-md bg-[#FF5E5B] px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90"
+          >
+            ☕ 커피 한 잔
+          </a>
         </div>
       </header>
 

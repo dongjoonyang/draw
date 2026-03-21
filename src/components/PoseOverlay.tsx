@@ -68,6 +68,7 @@ export type PoseOverlayHandle = {
   setRotationForKey: (key: BoxKey, degX: number, degY: number, degZ: number) => void;
   setScaleForKey: (key: BoxKey, x: number, y: number, z: number) => void;
   deselect: () => void;
+  captureImage: () => Promise<string | null>;
 };
 
 // ── Pose landmark indices ────────────────────────────────────────────────────
@@ -334,9 +335,51 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
     deselect: () => {
       deselectRef.current?.();
     },
+    captureImage: async () => {
+      const renderer = rendererRef.current;
+      const img = imageRef.current;
+      if (!renderer || !img) return null;
+      const w = img.offsetWidth;
+      const h = img.offsetHeight;
+      if (!w || !h) return null;
+
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const offscreen = document.createElement("canvas");
+      offscreen.width = w * dpr;
+      offscreen.height = h * dpr;
+      const ctx = offscreen.getContext("2d")!;
+      ctx.scale(dpr, dpr);
+
+      // 사진 그리기 (CORS 허용)
+      try {
+        const crossImg = new Image();
+        crossImg.crossOrigin = "anonymous";
+        await new Promise<void>((resolve, reject) => {
+          crossImg.onload = () => resolve();
+          crossImg.onerror = () => reject();
+          crossImg.src = img.src;
+        });
+        ctx.filter = `contrast(1.05)${photoGrayscaleRef.current ? " grayscale(100%)" : ""}`;
+        ctx.globalAlpha = photoOpacityRef.current;
+        ctx.drawImage(crossImg, 0, 0, w, h);
+        ctx.globalAlpha = 1;
+        ctx.filter = "none";
+      } catch {
+        // CORS 실패 시 도형 레이어만 저장
+      }
+
+      // Three.js 도형화 레이어 그리기
+      ctx.drawImage(renderer.domElement, 0, 0, w, h);
+
+      return offscreen.toDataURL("image/jpeg", 0.88);
+    },
   }));
   const onActionRef = useRef(onAction);
   onActionRef.current = onAction;
+  const photoOpacityRef = useRef(photoOpacity);
+  photoOpacityRef.current = photoOpacity;
+  const photoGrayscaleRef = useRef(photoGrayscale);
+  photoGrayscaleRef.current = photoGrayscale;
   const flashSetterRef = useRef<((key: string) => void) | null>(null);
   flashSetterRef.current = (key: string) => {
     onActionRef.current?.(key);
@@ -370,7 +413,7 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
         poseConnectionsRef.current = PoseLandmarker.POSE_CONNECTIONS;
 
         const vision = await FilesetResolver.forVisionTasks(
-          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+          "/mediapipe/wasm"
         );
         const poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
           baseOptions: {
@@ -553,7 +596,7 @@ const PoseOverlay = forwardRef<PoseOverlayHandle, Props>(function PoseOverlay({
 
     const container = threeLayerRef.current;
     const scene = new THREE.Scene();
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setClearColor(0x000000, 0);
     renderer.domElement.style.position = "absolute";

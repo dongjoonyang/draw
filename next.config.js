@@ -9,6 +9,16 @@ const nextConfig = {
       },
     ],
   },
+  async headers() {
+    return [
+      {
+        source: "/mediapipe/wasm/:file*.wasm",
+        headers: [
+          { key: "Content-Type", value: "application/wasm" },
+        ],
+      },
+    ];
+  },
 };
 
 module.exports = nextConfig;

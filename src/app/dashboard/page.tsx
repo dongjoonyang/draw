@@ -4,14 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import * as am5 from "@amcharts/amcharts5";
 import * as am5xy from "@amcharts/amcharts5/xy";
-import { getPracticeRecords } from "@/lib/storage";
+import { getPracticeRecords, getSavedImages, SavedPoseImage } from "@/lib/storage";
 
 export default function DashboardPage() {
   const chartRef = useRef<HTMLDivElement>(null);
   const [records, setRecords] = useState<{ date: string; poseCount: number; totalMinutes: number }[]>([]);
+  const [savedImages, setSavedImages] = useState<SavedPoseImage[]>([]);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   useEffect(() => {
     setRecords(getPracticeRecords());
+    setSavedImages(getSavedImages());
   }, []);
 
   useEffect(() => {
@@ -76,9 +79,17 @@ export default function DashboardPage() {
   const totalPoses = records.reduce((s, r) => s + r.poseCount, 0);
   const totalMinutes = records.reduce((s, r) => s + r.totalMinutes, 0);
 
+  const formatTotalTime = (min: number) => {
+    if (min === 0) return "0분";
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    if (h === 0) return `${m}분`;
+    return m === 0 ? `${h}시간` : `${h}시간 ${m}분`;
+  };
+
   const stats = [
     { label: "총 포즈", value: `${totalPoses}회` },
-    { label: "총 연습 시간", value: `${totalMinutes}분` },
+    { label: "총 연습 시간", value: formatTotalTime(totalMinutes) },
     { label: "연습 일수", value: `${records.length}일` },
     {
       label: "평균/일",
@@ -104,6 +115,12 @@ export default function DashboardPage() {
               성장의 기록
             </h1>
           </div>
+          <Link
+            href="/"
+            className="rounded-lg bg-accent px-4 py-1.5 text-xs font-medium text-white shadow-sm shadow-accent/30 hover:opacity-90"
+          >
+            연습 시작하기
+          </Link>
         </div>
       </header>
 
@@ -129,18 +146,85 @@ export default function DashboardPage() {
             <div className="flex min-h-[300px] flex-col items-center justify-center gap-3">
               <div className="text-3xl opacity-20">📊</div>
               <p className="text-sm text-ink/30">아직 연습 기록이 없습니다</p>
-              <Link
-                href="/"
-                className="rounded-lg bg-accent px-4 py-2 text-xs font-medium text-white shadow-sm shadow-accent/30 hover:opacity-90"
-              >
-                연습 시작하기
-              </Link>
             </div>
           ) : (
-            <div ref={chartRef} className="h-[360px] w-full" />
+            <div ref={chartRef} className="h-[200px] w-full" />
+          )}
+        </div>
+
+        {/* Saved images */}
+        <div className="mt-6 rounded-xl border border-ink/[0.06] bg-white/60 p-6">
+          <h2 className="mb-1 text-sm font-semibold text-ink">저장된 포즈</h2>
+          <p className="mb-5 text-xs text-ink/40">날짜별 저장한 포즈 이미지</p>
+          {savedImages.length === 0 ? (
+            <div className="flex min-h-[120px] flex-col items-center justify-center gap-2">
+              <p className="text-sm text-ink/30">아직 저장된 포즈가 없습니다</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-6">
+              {Object.entries(
+                savedImages.reduce<Record<string, SavedPoseImage[]>>((acc, img) => {
+                  (acc[img.date] ??= []).push(img);
+                  return acc;
+                }, {})
+              )
+                .sort(([a], [b]) => b.localeCompare(a))
+                .map(([date, images]) => (
+                  <div key={date}>
+                    <p className="mb-3 text-xs font-semibold text-ink/40">{date} · {images.length}회</p>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                      {images.map((img) => (
+                        <button
+                          key={img.id}
+                          onClick={() => setLightboxUrl(img.imageUrl)}
+                          className="group relative overflow-hidden rounded-lg bg-ink/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                        >
+                          <div className="aspect-[3/4]">
+                            <img
+                              src={img.imageUrl}
+                              alt="저장된 포즈"
+                              className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                            />
+                          </div>
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors duration-200 group-hover:bg-black/20">
+                            <span className="scale-75 rounded-full bg-white/80 p-2 opacity-0 transition-all duration-200 group-hover:scale-100 group-hover:opacity-100">
+                              <svg className="h-4 w-4 text-ink" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0zM11 8v6M8 11h6" />
+                              </svg>
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+            </div>
           )}
         </div>
       </div>
+
+      {/* 라이트박스 */}
+      {lightboxUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={() => setLightboxUrl(null)}
+        >
+          <img
+            src={lightboxUrl}
+            alt="확대 보기"
+            className="max-h-[90vh] max-w-[90vw] rounded-xl object-contain shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            onClick={() => setLightboxUrl(null)}
+            className="absolute right-5 top-5 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+          >
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
     </main>
   );
 }
