@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Analytics } from "@vercel/analytics/next";
+import Navbar from "@/components/Navbar";
 
 export const metadata: Metadata = {
-  title: "인체 도형화 자가학습 플랫폼",
-  description: "평가가 아닌 성장의 기록 - 나만의 연습 공간",
+  title: "Dream - 아트 플랫폼",
+  description: "그림 연습, 공유, 소통을 위한 아트 플랫폼",
 };
 
 export default function RootLayout({
@@ -14,8 +15,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko">
-      <body className="antialiased min-h-screen">
-        {children}
+      <body className="antialiased min-h-screen bg-gray-950 text-white">
+        <Navbar />
+        <main className="pt-14">
+          {children}
+        </main>
         <Analytics />
       </body>
     </html>
