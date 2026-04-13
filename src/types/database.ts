@@ -111,6 +111,7 @@ export type Database = {
           description: string | null
           created_at: string
           username: string
+          avatar_url: string | null
           likes_count: number
           comments_count: number
         }
