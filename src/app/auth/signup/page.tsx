@@ -1,7 +1,7 @@
 // src/app/auth/signup/page.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase";
 
@@ -11,7 +11,7 @@ export default function SignupPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,9 +27,10 @@ export default function SignupPage() {
     });
 
     if (error) {
-      setError(error.message);
+      setError("이미 사용 중인 이메일이거나 가입에 실패했습니다.");
       setLoading(false);
     } else {
+      setLoading(false);
       setDone(true);
     }
   };
@@ -38,7 +39,6 @@ export default function SignupPage() {
     return (
       <div className="min-h-[calc(100vh-3.5rem)] flex items-center justify-center px-4">
         <div className="text-center">
-          <div className="text-4xl mb-4">✉️</div>
           <h1 className="text-2xl font-bold text-white mb-3">이메일을 확인해주세요</h1>
           <p className="text-gray-400 text-sm mb-2">
             <span className="text-white">{email}</span>로 인증 메일을 보냈습니다.
@@ -61,8 +61,9 @@ export default function SignupPage() {
         <h1 className="text-2xl font-bold text-white mb-8 text-center">회원가입</h1>
         <form onSubmit={handleSignup} className="space-y-4">
           <div>
-            <label className="block text-sm text-gray-400 mb-1.5">이메일</label>
+            <label htmlFor="email" className="block text-sm text-gray-400 mb-1.5">이메일</label>
             <input
+              id="email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -72,8 +73,9 @@ export default function SignupPage() {
             />
           </div>
           <div>
-            <label className="block text-sm text-gray-400 mb-1.5">비밀번호 (6자 이상)</label>
+            <label htmlFor="password" className="block text-sm text-gray-400 mb-1.5">비밀번호 (6자 이상)</label>
             <input
+              id="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
