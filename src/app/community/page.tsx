@@ -18,7 +18,6 @@ export default function CommunityPage() {
         .from("community_feed")
         .select("*")
         .order("created_at", { ascending: false });
-
       if (!error) setPosts(data ?? []);
       setLoading(false);
     }
@@ -26,12 +25,12 @@ export default function CommunityPage() {
   }, [supabase]);
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8">
+    <div className="max-w-3xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold text-white">커뮤니티</h1>
+        <h1 className="text-xl font-bold text-[#141415]">커뮤니티</h1>
         <Link
           href="/community/new"
-          className="text-sm bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition-colors"
+          className="text-sm bg-[#3478FF] hover:bg-[#1A5FD4] text-white px-4 py-2 rounded-lg transition-colors font-medium"
         >
           글쓰기
         </Link>
@@ -40,13 +39,13 @@ export default function CommunityPage() {
       {loading ? (
         <div className="space-y-3">
           {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="bg-gray-900 rounded-xl h-20 animate-pulse" />
+            <div key={i} className="bg-white rounded-xl h-20 animate-pulse border border-[#E5E7EB]" />
           ))}
         </div>
       ) : posts.length === 0 ? (
         <div className="text-center py-20">
-          <p className="text-gray-500 text-sm mb-4">아직 게시글이 없습니다.</p>
-          <Link href="/community/new" className="text-indigo-400 hover:text-indigo-300 text-sm">
+          <p className="text-[#6B7280] text-sm mb-4">아직 게시글이 없습니다.</p>
+          <Link href="/community/new" className="text-[#3478FF] hover:text-[#1A5FD4] text-sm font-medium">
             첫 글을 남겨보세요 →
           </Link>
         </div>
@@ -56,11 +55,11 @@ export default function CommunityPage() {
             <Link
               key={post.id}
               href={`/community/${post.id}`}
-              className="block bg-gray-900 rounded-xl px-5 py-4 border border-gray-800 hover:border-gray-700 transition-colors"
+              className="block bg-white rounded-xl px-5 py-4 border border-[#E5E7EB] shadow-sm hover:shadow-md transition-shadow"
             >
-              <h2 className="text-white font-medium text-sm mb-2 line-clamp-1">{post.title}</h2>
-              <div className="flex items-center gap-3 text-gray-500 text-xs">
-                <span>{post.username}</span>
+              <h2 className="text-[#141415] font-medium text-sm mb-2 line-clamp-1">{post.title}</h2>
+              <div className="flex items-center gap-3 text-[#9CA3AF] text-xs">
+                <span className="text-[#6B7280]">{post.username}</span>
                 <span>댓글 {post.comments_count}</span>
                 <span className="ml-auto">
                   {new Date(post.created_at).toLocaleDateString("ko-KR")}
