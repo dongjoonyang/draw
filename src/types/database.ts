@@ -23,6 +23,7 @@ export type Database = {
           avatar_url?: string | null
           bio?: string | null
         }
+        Relationships: []
       }
       gallery_posts: {
         Row: {
@@ -45,6 +46,7 @@ export type Database = {
           title?: string
           description?: string | null
         }
+        Relationships: []
       }
       community_posts: {
         Row: {
@@ -65,26 +67,32 @@ export type Database = {
           title?: string
           content?: string
         }
+        Relationships: []
       }
       likes: {
         Row: {
           user_id: string
           post_id: string
-          post_type: 'gallery' | 'community'
+          post_type: string
         }
         Insert: {
           user_id: string
           post_id: string
-          post_type: 'gallery' | 'community'
+          post_type: string
         }
-        Update: never
+        Update: {
+          user_id?: string
+          post_id?: string
+          post_type?: string
+        }
+        Relationships: []
       }
       comments: {
         Row: {
           id: string
           user_id: string
           post_id: string
-          post_type: 'gallery' | 'community'
+          post_type: string
           content: string
           created_at: string
         }
@@ -92,13 +100,14 @@ export type Database = {
           id?: string
           user_id: string
           post_id: string
-          post_type: 'gallery' | 'community'
+          post_type: string
           content: string
           created_at?: string
         }
         Update: {
           content?: string
         }
+        Relationships: []
       }
     }
     Views: {
@@ -115,6 +124,7 @@ export type Database = {
           likes_count: number
           comments_count: number
         }
+        Relationships: []
       }
       community_feed: {
         Row: {
@@ -126,7 +136,11 @@ export type Database = {
           username: string
           comments_count: number
         }
+        Relationships: []
       }
     }
+    Functions: Record<string, never>
+    Enums: Record<string, never>
+    CompositeTypes: Record<string, never>
   }
 }
